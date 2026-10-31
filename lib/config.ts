@@ -20,7 +20,8 @@ export type PipelineCfg = {
 export type GlobalCfg = {
   paused: boolean;
   senderName: string;
-  fromAddress: string;
+  fromAddress: string;  // kept for backward compat; first of fromAddresses
+  fromAddresses: string[]; // round-robin sender pool (up to 10)
   dc: string;
   cap: number;
   minGap: number;
@@ -28,7 +29,7 @@ export type GlobalCfg = {
   breakChance: number;
 };
 export type SentStamp = { t: number; p: string };
-export type State = { nextAllowed: number; stamps: SentStamp[]; seen: string[] };
+export type State = { nextAllowed: number; stamps: SentStamp[]; seen: string[]; rrIndex: number };
 export type ZohoState = { refresh?: string; accountId?: string; inboxId?: string };
 
 const SIG = "Regards,\nSohail Anwar\nSource Pivot";
@@ -67,13 +68,14 @@ export const DEFAULT_GLOBAL: GlobalCfg = {
   paused: true,
   senderName: "Sohail Anwar",
   fromAddress: "",
+  fromAddresses: [],
   dc: "com",
   cap: 150,
   minGap: 3,
   maxGap: 14,
   breakChance: 0.1,
 };
-export const DEFAULT_STATE: State = { nextAllowed: 0, stamps: [], seen: [] };
+export const DEFAULT_STATE: State = { nextAllowed: 0, stamps: [], seen: [], rrIndex: 0 };
 
 /** key/value store living in a hidden-ish tab of the main sheet. */
 export async function loadConfig(): Promise<Record<string, string>> {

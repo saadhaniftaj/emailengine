@@ -176,14 +176,23 @@ function scheduleNew(x: Ctx) {
     if (seen[email]) { set(x, r, "Status", "Duplicate"); continue; }
     seen[email] = 1;
     if (get(x, r, "Due At")) continue;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !firstName(get(x, r, "Name"))) {
-      set(x, r, "Status", "Needs Review"); continue;
+
+    // Only 3 mandatory fields: Name, Email, Company
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !firstName(get(x, r, "Name")) || !get(x, r, "Company")) {
+      set(x, r, "Status", "Needs Review"); set(x, r, "Notes", "Missing name, email or company"); continue;
     }
-    set(x, r, "Time Zone", tzFor(get(x, r, "Location")).tz);
+
+    // Set timezone if Location column exists (optional)
+    const loc = get(x, r, "Location");
+    if (loc) set(x, r, "Time Zone", tzFor(loc).tz);
+
     const dateSent = get(x, r, "Date Sent");
-    if (!st && dateSent && !isNaN(Date.parse(dateSent))) {     // already contacted before the engine
-      st = "Awaiting Reply";
-      set(x, r, "Status", st); set(x, r, "Last Sent At", new Date(dateSent).toISOString()); set(x, r, "Follow-ups Sent", 0);
+    // Skip rows already mailed before the engine started — do NOT reschedule them,
+    // keep Status blank so they stay invisible to the engine.
+    // Only process them if the Status was explicitly set to "Awaiting Reply".
+    if (!st && dateSent && !isNaN(Date.parse(dateSent))) {
+      // Pre-existing send — leave alone, do not queue a follow-up automatically.
+      continue;
     }
     if (!st || st === "Not Sent") {
       set(x, r, "Status", "Not Sent"); set(x, r, "Due At", new Date().toISOString());
@@ -196,12 +205,19 @@ function scheduleNew(x: Ctx) {
   }
 }
 
+
 /* ---------- main tick ---------- */
 export async function tick(): Promise<string> {
   const cfg = await loadConfig();
   const g: GlobalCfg = getGlobal(cfg), state = getState(cfg), zs = getZoho(cfg);
   if (!zs.refresh) return "zoho not connected";
-  if (!g.fromAddress) return "from address not set";
+
+  // Resolve the sender pool for round-robin
+  const pool: string[] = g.fromAddresses && g.fromAddresses.length > 0
+    ? g.fromAddresses
+    : g.fromAddress ? [g.fromAddress] : [];
+  if (!pool.length) return "from address not set";
+
   const zoho = new Zoho(g.dc, zs);
 
   const ctxs: Ctx[] = [];
@@ -226,13 +242,19 @@ export async function tick(): Promise<string> {
         const st = get(x, r, "Status"), due = get(x, r, "Due At");
         if (!due || (st !== "Not Sent" && st !== "Awaiting Reply")) continue;
         if (new Date(due).getTime() > now.getTime()) continue;
-        if (inWindow(now, get(x, r, "Location"), x.cfg.startH, x.cfg.endH)) elig.push({ x, r });
+        // Use Location if available, otherwise always in-window (fallback)
+        const loc = get(x, r, "Location");
+        if (!loc || inWindow(now, loc, x.cfg.startH, x.cfg.endH)) elig.push({ x, r });
       }
     }
     for (const x of ctxs) await flush(x);
     if (elig.length) {
       const { x, r } = elig[Math.floor(Math.random() * elig.length)];
-      result = await sendOne(x, r, zoho, g, state);
+      // Round-robin sender
+      const rrIdx = (state.rrIndex || 0) % pool.length;
+      const fromAddr = pool[rrIdx];
+      state.rrIndex = rrIdx + 1;
+      result = await sendOne(x, r, zoho, g, state, fromAddr);
       state.stamps.push({ t: Date.now(), p: x.p.id });
       const gap = (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000 + (Math.random() < g.breakChance ? (10 + Math.random() * 25) * 60000 : 0);
       state.nextAllowed = Date.now() + gap;
@@ -242,7 +264,8 @@ export async function tick(): Promise<string> {
   return result;
 }
 
-async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State) {
+
+async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State, fromAddr?: string) {
   const email = get(x, r, "Email");
   const step = get(x, r, "Status") === "Not Sent" ? 0 : Number(get(x, r, "Follow-ups Sent") || 0) + 1;
   const tpl = x.cfg.templates[step];
@@ -252,10 +275,11 @@ async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State
   if (/\{\{.*?\}\}/.test(subject + body)) {
     set(x, r, "Status", "Needs Review"); set(x, r, "Due At", ""); await flush(x); return "unfilled placeholder: " + email;
   }
+  const sender = fromAddr || g.fromAddress;
   const prev = get(x, r, "Message ID");
   let id: string;
-  if (step === 0 || !prev) id = await zoho.send(email, subject, body, g.fromAddress, g.senderName);
-  else id = (await zoho.reply(prev, email, subject, body, g.fromAddress, g.senderName)).id;
+  if (step === 0 || !prev) id = await zoho.send(email, subject, body, sender, g.senderName);
+  else id = (await zoho.reply(prev, email, subject, body, sender, g.senderName)).id;
 
   const nowIso = new Date().toISOString();
   if (step === 0 || !prev) set(x, r, "Message ID", id);
@@ -265,10 +289,11 @@ async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State
   set(x, r, "Follow-ups Sent", step);
   set(x, r, "Last Step", step === 0 ? "Initial" : "Follow-up " + step);
   // write the date into the user's own "Followup N" column if present
-  const fuName = ["followup" + step];
-  if (step > 0 && x.col[fuName[0]] !== undefined) set(x, r, x.header[x.col[fuName[0]]], nowIso.slice(0, 10));
+  const fuName = "followup" + step;
+  if (step > 0 && x.col[fuName] !== undefined) set(x, r, x.header[x.col[fuName]], nowIso.slice(0, 10));
   if (step >= x.cfg.delays.length) { set(x, r, "Due At", ""); set(x, r, "Status", "No Response"); }
   else set(x, r, "Due At", new Date(Date.now() + x.cfg.delays[step] * 3600000).toISOString());
   await flush(x);
-  return `sent step ${step} to ${email}`;
+  return `sent step ${step} to ${email} from ${sender}`;
 }
+

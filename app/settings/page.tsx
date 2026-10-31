@@ -35,17 +35,49 @@ export default function Settings() {
       <section className="glass stack">
         <h2>Sending</h2>
         <div className="fields">
-          <div><label className="f">Sender name</label><input value={g.senderName} onChange={(e) => upd({ senderName: e.target.value })} /></div>
-          <div><label className="f">From address (Zoho)</label><input placeholder="you@sourcepivot.co" value={g.fromAddress} onChange={(e) => upd({ fromAddress: e.target.value })} /></div>
+          <div><label className="f">Sender name (display)</label><input value={g.senderName} onChange={(e) => upd({ senderName: e.target.value })} /></div>
           <div><label className="f">Zoho data center</label><input placeholder="com / in / eu / com.au" value={g.dc} onChange={(e) => upd({ dc: e.target.value })} /></div>
         </div>
-        <div className="fields">
+
+        <div className="step">
+          <h3>Round-robin sender pool</h3>
+          <p className="hint" style={{ margin: ".3rem 0 .8rem" }}>
+            Add up to 10 <code className="k">@sourcepivot.co</code> addresses. The engine cycles through them in order so no single mailbox sends too many emails.
+            The first address is also used as the fallback if the list is empty.
+          </p>
+          <div className="stack">
+            {(g.fromAddresses && g.fromAddresses.length > 0 ? g.fromAddresses : [g.fromAddress || ""]).map((addr: string, i: number) => (
+              <div className="row" key={i}>
+                <span style={{ minWidth: 70, fontWeight: 700, fontSize: ".85rem" }}>Sender {i + 1}</span>
+                <input style={{ flex: 1 }} placeholder="name@sourcepivot.co" value={addr}
+                  onChange={(e) => {
+                    const arr = [...(g.fromAddresses?.length ? g.fromAddresses : [g.fromAddress || ""])];
+                    arr[i] = e.target.value;
+                    upd({ fromAddresses: arr, fromAddress: arr[0] });
+                  }} />
+                {i > 0 && (
+                  <button className="btn small ghost" onClick={() => {
+                    const arr = [...(g.fromAddresses || [])].filter((_: string, j: number) => j !== i);
+                    upd({ fromAddresses: arr, fromAddress: arr[0] || "" });
+                  }}>Remove</button>
+                )}
+              </div>
+            ))}
+            {(g.fromAddresses?.length || 1) < 10 && (
+              <button className="btn small ghost" onClick={() => upd({ fromAddresses: [...(g.fromAddresses?.length ? g.fromAddresses : [g.fromAddress || ""]), ""] })}>
+                + Add sender
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="fields" style={{ marginTop: "1rem" }}>
           <div><label className="f">Total cap / rolling 24h</label><input type="number" value={g.cap} onChange={(e) => upd({ cap: +e.target.value })} /></div>
           <div><label className="f">Min gap (minutes)</label><input type="number" value={g.minGap} onChange={(e) => upd({ minGap: +e.target.value })} /></div>
           <div><label className="f">Max gap (minutes)</label><input type="number" value={g.maxGap} onChange={(e) => upd({ maxGap: +e.target.value })} /></div>
-          <div><label className="f">Random long break chance (0–1)</label><input type="number" step="0.05" min="0" max="1" value={g.breakChance} onChange={(e) => upd({ breakChance: +e.target.value })} /></div>
+          <div><label className="f">Long break chance (0–1)</label><input type="number" step="0.05" min="0" max="1" value={g.breakChance} onChange={(e) => upd({ breakChance: +e.target.value })} /></div>
         </div>
-        <p className="hint">Gaps between sends are random. A break chance of 0.1 means ~1 in 10 sends is followed by an extra 10–35 minute pause.</p>
+        <p className="hint">Gaps are random. A break chance of 0.1 means ~1 in 10 sends adds an extra 10–35 min pause.</p>
         <div><button className="btn" id="save-global" onClick={save}>Save</button></div>
       </section>
 

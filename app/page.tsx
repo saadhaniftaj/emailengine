@@ -50,7 +50,10 @@ export default function Overview() {
     <main className="container">
       <span className="section-label">Control center</span>
       <div className="row between">
-        <h1 className="title">Outreach <span className="gradient-text">Engine</span></h1>
+        <div>
+          <p style={{ color: "var(--text-muted)", fontWeight: 600, marginBottom: ".2rem" }}>👋 Hi, Sohail</p>
+          <h1 className="title">Outreach <span className="gradient-text">Engine</span></h1>
+        </div>
         <div className="row">
           <button className="btn ghost small" id="run-now" disabled={busy} onClick={runNow}>{busy ? "Running…" : "Run cycle now"}</button>
           <button id="master-toggle" className={"btn " + (g.paused ? "play" : "pause")} onClick={() => save({ global: { paused: !g.paused } })}>
