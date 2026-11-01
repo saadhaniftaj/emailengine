@@ -207,7 +207,7 @@ function scheduleNew(x: Ctx) {
 
 
 /* ---------- main tick ---------- */
-export async function tick(): Promise<string> {
+export async function tick(force = false): Promise<string> {
   const cfg = await loadConfig();
   const g: GlobalCfg = getGlobal(cfg), state = getState(cfg), zs = getZoho(cfg);
   if (!zs.refresh) return "zoho not connected";
@@ -227,7 +227,7 @@ export async function tick(): Promise<string> {
   state.stamps = state.stamps.filter((s) => now.getTime() - s.t < 86400000);
   if (!state.lastCompany) state.lastCompany = "";
 
-  if (!g.paused && now.getTime() >= state.nextAllowed && state.stamps.length < g.cap) {
+  if ((force || !g.paused) && now.getTime() >= state.nextAllowed && state.stamps.length < g.cap) {
     const elig: { x: Ctx; r: number; co: string }[] = [];
     for (const x of ctxs) {
       if (x.cfg.paused) continue;
