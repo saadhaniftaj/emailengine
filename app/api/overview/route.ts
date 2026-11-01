@@ -6,6 +6,10 @@ import { norm } from "@/lib/engine";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// 60-second server-side cache to avoid Sheets API quota errors
+let cache: { data: unknown; at: number } | null = null;
+const CACHE_TTL = 60_000;
+
 export async function GET() {
   const env = {
     sheet: !!process.env.SHEET_ID,
@@ -14,6 +18,12 @@ export async function GET() {
     cron: !!process.env.CRON_SECRET,
   };
   if (!env.sheet || !env.google) return NextResponse.json({ env, ready: false });
+
+  // Return cached response if fresh
+  if (cache && Date.now() - cache.at < CACHE_TTL) {
+    return NextResponse.json(cache.data);
+  }
+
   try {
     const cfg = await loadConfig();
     const tabs = await getTabs();
@@ -52,11 +62,13 @@ export async function GET() {
       });
     }
     const g = getGlobal(cfg);
-    return NextResponse.json({
+    const data = {
       ready: true, env, global: g, zohoConnected: !!getZoho(cfg).refresh, pipelines,
       sent24h: state.stamps.filter((s) => now - s.t < 86400000).length,
       nextAllowed: state.nextAllowed,
-    });
+    };
+    cache = { data, at: Date.now() }; // store in cache
+    return NextResponse.json(data);
   } catch (e: any) {
     return NextResponse.json({ env, ready: false, error: e.message });
   }

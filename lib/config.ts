@@ -32,27 +32,26 @@ export type SentStamp = { t: number; p: string };
 export type State = { nextAllowed: number; stamps: SentStamp[]; seen: string[]; rrIndex: number; lastCompany: string; companyLast: Record<string, number> };
 export type ZohoState = { refresh?: string; accountId?: string; inboxId?: string };
 
-const SIG = "Regards,\nSohail Anwar\nSource Pivot";
 export const DEFAULT_TEMPLATES: Template[] = [
   {
     subject: "{Request for Meeting|Quick introduction|Potential collaboration}",
-    body: `{Hi|Hello} {{FirstName}},\n\nI'm reaching out to explore a potential collaboration with {{CompanyName}}.\n\nWe support research teams with B2B recruitment and fieldwork across APAC, EMEA, and the Americas, particularly for niche and hard-to-reach audiences.\n\nIf {{CompanyName}} has any upcoming projects where additional recruitment or fieldwork support could be useful, I'd be happy to explore how we can help.\n\nWould you be open to a quick 15-minute call next week?\n\n${SIG}`,
+    body: `{Hi|Hello} {{FirstName}},\n\nI'm reaching out to explore a potential collaboration with {{CompanyName}}.\n\nWe support research teams with B2B recruitment and fieldwork across APAC, EMEA, and the Americas, particularly for niche and hard-to-reach audiences.\n\nIf {{CompanyName}} has any upcoming projects where additional recruitment or fieldwork support could be useful, I'd be happy to explore how we can help.\n\nWould you be open to a quick 15-minute call next week?`,
   },
   {
     subject: "Re: Request for Meeting",
-    body: `{Hi|Hello} {{FirstName}},\n\n{Just following up on my previous note.|Just circling back on my earlier message.|Wanted to quickly follow up on my last note.}\n\nWould you be available for a quick introductory call?\n\n{Looking forward to hearing from you.|Happy to work around your schedule.}\n\n${SIG}`,
+    body: `{Hi|Hello} {{FirstName}},\n\n{Just following up on my previous note.|Just circling back on my earlier message.|Wanted to quickly follow up on my last note.}\n\nWould you be available for a quick introductory call?\n\n{Looking forward to hearing from you.|Happy to work around your schedule.}`,
   },
   {
     subject: "Re: Request for Meeting",
-    body: `{Hello|Hi} {{FirstName}},\n\nI wanted to check back in case additional recruitment or fieldwork support is relevant to any projects currently in your pipeline.\n\nWe can help source niche professional audiences and provide fieldwork support across multiple markets, depending on your project needs.\n\nIf there's a brief you're able to share, I'd be glad to review it and provide an initial feasibility assessment.\n\n${SIG}`,
+    body: `{Hello|Hi} {{FirstName}},\n\nI wanted to check back in case additional recruitment or fieldwork support is relevant to any projects currently in your pipeline.\n\nWe can help source niche professional audiences and provide fieldwork support across multiple markets, depending on your project needs.\n\nIf there's a brief you're able to share, I'd be glad to review it and provide an initial feasibility assessment.`,
   },
   {
     subject: "Re: Request for Meeting",
-    body: `{Hello|Hi} {{FirstName}},\n\nI know priorities and project timelines can shift, so I wanted to reach out {one last time|once more}.\n\nIf your team needs additional support reaching hard-to-find professionals or managing fieldwork for an upcoming study, Source Pivot would be glad to be considered.\n\nFeel free to keep my details on hand, and reach out whenever a suitable requirement comes up.\n\n${SIG}`,
+    body: `{Hello|Hi} {{FirstName}},\n\nI know priorities and project timelines can shift, so I wanted to reach out {one last time|once more}.\n\nIf your team needs additional support reaching hard-to-find professionals or managing fieldwork for an upcoming study, Source Pivot would be glad to be considered.\n\nFeel free to keep my details on hand, and reach out whenever a suitable requirement comes up.`,
   },
   {
     subject: "Re: Request for Meeting",
-    body: `{Hello|Hi} {{FirstName}},\n\n{Just a final check-in from my side.|Just one more note from my side.}\n\nWould you be available for a quick introductory call? If now isn't the right time, no problem at all.\n\n{Looking forward to hearing from you.|Thanks for your time.}\n\n${SIG}`,
+    body: `{Hello|Hi} {{FirstName}},\n\n{Just a final check-in from my side.|Just one more note from my side.}\n\nWould you be available for a quick introductory call? If now isn't the right time, no problem at all.\n\n{Looking forward to hearing from you.|Thanks for your time.}`,
   },
 ];
 
