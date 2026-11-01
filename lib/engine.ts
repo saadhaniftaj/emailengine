@@ -225,18 +225,10 @@ export async function tick(): Promise<string> {
   let result = "idle";
   const now = new Date();
   state.stamps = state.stamps.filter((s) => now.getTime() - s.t < 86400000);
-  if (!state.companyLast) state.companyLast = {};
-
-  // Prune companyLast entries older than 7 days
-  const weekMs = 7 * 86400000;
-  for (const k of Object.keys(state.companyLast)) {
-    if (now.getTime() - state.companyLast[k] > weekMs) delete state.companyLast[k];
-  }
-
-  const companyGapMs = (g.companyGapH ?? 24) * 3600000;
+  if (!state.lastCompany) state.lastCompany = "";
 
   if (!g.paused && now.getTime() >= state.nextAllowed && state.stamps.length < g.cap) {
-    const elig: { x: Ctx; r: number }[] = [];
+    const elig: { x: Ctx; r: number; co: string }[] = [];
     for (const x of ctxs) {
       if (x.cfg.paused) continue;
       scheduleNew(x);
@@ -245,30 +237,32 @@ export async function tick(): Promise<string> {
         const st = get(x, r, "Status"), due = get(x, r, "Due At");
         if (!due || (st !== "Not Sent" && st !== "Awaiting Reply")) continue;
         if (new Date(due).getTime() > now.getTime()) continue;
-
-        // Company spacing: skip if another contact at same company was emailed recently
-        const co = norm(get(x, r, "Company"));
-        if (co && state.companyLast[co] && now.getTime() - state.companyLast[co] < companyGapMs) continue;
-
         const loc = get(x, r, "Location");
-        if (!loc || inWindow(now, loc, x.cfg.startH, x.cfg.endH)) elig.push({ x, r });
+        if (loc && !inWindow(now, loc, x.cfg.startH, x.cfg.endH)) continue;
+        const co = norm(get(x, r, "Company"));
+        elig.push({ x, r, co });
       }
     }
     for (const x of ctxs) await flush(x);
+
     if (elig.length) {
-      const { x, r } = elig[Math.floor(Math.random() * elig.length)];
-      result = await sendOne(x, r, zoho, g, state);
-      state.stamps.push({ t: Date.now(), p: x.p.id });
-      // Record company send time
-      const co = norm(get(x, r, "Company"));
-      if (co) state.companyLast[co] = Date.now();
-      const gap = (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000 + (Math.random() < g.breakChance ? (10 + Math.random() * 25) * 60000 : 0);
+      // Prefer leads whose company is NOT the last one we emailed (interleave)
+      const preferred = elig.filter((e) => e.co !== state.lastCompany);
+      const pool = preferred.length > 0 ? preferred : elig; // fallback: all eligible
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      result = await sendOne(pick.x, pick.r, zoho, g, state);
+      state.stamps.push({ t: Date.now(), p: pick.x.p.id });
+      state.lastCompany = pick.co; // remember for next tick
+      // Random gap between sends (minutes) + occasional long break
+      const gap = (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000
+        + (Math.random() < g.breakChance ? (10 + Math.random() * 25) * 60000 : 0);
       state.nextAllowed = Date.now() + gap;
     }
   }
   await saveKey("state", state);
   return result;
 }
+
 
 async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State) {
   const email = get(x, r, "Email");

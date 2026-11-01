@@ -40,21 +40,6 @@ export default function Settings() {
           <div><label className="f">Zoho data center</label><input placeholder="com / in / eu / com.au" value={g.dc} onChange={(e) => upd({ dc: e.target.value })} /></div>
         </div>
 
-        <div className="step" style={{ marginTop: "1rem", padding: "1rem", background: "rgba(255,255,255,.04)", borderRadius: "10px", border: "1px solid rgba(255,255,255,.08)" }}>
-          <h3 style={{ marginBottom: ".4rem" }}>Company spacing <span style={{ fontWeight: 400, fontSize: ".85rem", opacity: .7 }}>(anti-spam)</span></h3>
-          <p className="hint" style={{ margin: "0 0 .8rem" }}>
-            When multiple contacts from the <b>same company</b> are in your sheet (CEO, PM, Head of Research…), 
-            the engine staggers outreach so you don&apos;t hit several people on the same day. 
-            Set the minimum hours to wait before emailing the next person at the same company.
-          </p>
-          <div className="fields">
-            <div>
-              <label className="f">Min hours between contacts at the same company</label>
-              <input type="number" min="1" value={g.companyGapH ?? 24} onChange={(e) => upd({ companyGapH: +e.target.value })} />
-            </div>
-          </div>
-        </div>
-
         <div className="fields" style={{ marginTop: "1rem" }}>
           <div><label className="f">Total cap / rolling 24h</label><input type="number" value={g.cap} onChange={(e) => upd({ cap: +e.target.value })} /></div>
           <div><label className="f">Min gap between sends (minutes)</label><input type="number" value={g.minGap} onChange={(e) => upd({ minGap: +e.target.value })} /></div>
