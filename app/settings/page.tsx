@@ -36,45 +36,29 @@ export default function Settings() {
         <h2>Sending</h2>
         <div className="fields">
           <div><label className="f">Sender name (display)</label><input value={g.senderName} onChange={(e) => upd({ senderName: e.target.value })} /></div>
+          <div><label className="f">Your Zoho email (from address)</label><input placeholder="sohail@sourcepivot.co" value={g.fromAddress} onChange={(e) => upd({ fromAddress: e.target.value })} /></div>
           <div><label className="f">Zoho data center</label><input placeholder="com / in / eu / com.au" value={g.dc} onChange={(e) => upd({ dc: e.target.value })} /></div>
         </div>
 
-        <div className="step">
-          <h3>Round-robin sender pool</h3>
-          <p className="hint" style={{ margin: ".3rem 0 .8rem" }}>
-            Add up to 10 <code className="k">@sourcepivot.co</code> addresses. The engine cycles through them in order so no single mailbox sends too many emails.
-            The first address is also used as the fallback if the list is empty.
+        <div className="step" style={{ marginTop: "1rem", padding: "1rem", background: "rgba(255,255,255,.04)", borderRadius: "10px", border: "1px solid rgba(255,255,255,.08)" }}>
+          <h3 style={{ marginBottom: ".4rem" }}>Company spacing <span style={{ fontWeight: 400, fontSize: ".85rem", opacity: .7 }}>(anti-spam)</span></h3>
+          <p className="hint" style={{ margin: "0 0 .8rem" }}>
+            When multiple contacts from the <b>same company</b> are in your sheet (CEO, PM, Head of Research…), 
+            the engine staggers outreach so you don&apos;t hit several people on the same day. 
+            Set the minimum hours to wait before emailing the next person at the same company.
           </p>
-          <div className="stack">
-            {(g.fromAddresses && g.fromAddresses.length > 0 ? g.fromAddresses : [g.fromAddress || ""]).map((addr: string, i: number) => (
-              <div className="row" key={i}>
-                <span style={{ minWidth: 70, fontWeight: 700, fontSize: ".85rem" }}>Sender {i + 1}</span>
-                <input style={{ flex: 1 }} placeholder="name@sourcepivot.co" value={addr}
-                  onChange={(e) => {
-                    const arr = [...(g.fromAddresses?.length ? g.fromAddresses : [g.fromAddress || ""])];
-                    arr[i] = e.target.value;
-                    upd({ fromAddresses: arr, fromAddress: arr[0] });
-                  }} />
-                {i > 0 && (
-                  <button className="btn small ghost" onClick={() => {
-                    const arr = [...(g.fromAddresses || [])].filter((_: string, j: number) => j !== i);
-                    upd({ fromAddresses: arr, fromAddress: arr[0] || "" });
-                  }}>Remove</button>
-                )}
-              </div>
-            ))}
-            {(g.fromAddresses?.length || 1) < 10 && (
-              <button className="btn small ghost" onClick={() => upd({ fromAddresses: [...(g.fromAddresses?.length ? g.fromAddresses : [g.fromAddress || ""]), ""] })}>
-                + Add sender
-              </button>
-            )}
+          <div className="fields">
+            <div>
+              <label className="f">Min hours between contacts at the same company</label>
+              <input type="number" min="1" value={g.companyGapH ?? 24} onChange={(e) => upd({ companyGapH: +e.target.value })} />
+            </div>
           </div>
         </div>
 
         <div className="fields" style={{ marginTop: "1rem" }}>
           <div><label className="f">Total cap / rolling 24h</label><input type="number" value={g.cap} onChange={(e) => upd({ cap: +e.target.value })} /></div>
-          <div><label className="f">Min gap (minutes)</label><input type="number" value={g.minGap} onChange={(e) => upd({ minGap: +e.target.value })} /></div>
-          <div><label className="f">Max gap (minutes)</label><input type="number" value={g.maxGap} onChange={(e) => upd({ maxGap: +e.target.value })} /></div>
+          <div><label className="f">Min gap between sends (minutes)</label><input type="number" value={g.minGap} onChange={(e) => upd({ minGap: +e.target.value })} /></div>
+          <div><label className="f">Max gap between sends (minutes)</label><input type="number" value={g.maxGap} onChange={(e) => upd({ maxGap: +e.target.value })} /></div>
           <div><label className="f">Long break chance (0–1)</label><input type="number" step="0.05" min="0" max="1" value={g.breakChance} onChange={(e) => upd({ breakChance: +e.target.value })} /></div>
         </div>
         <p className="hint">Gaps are random. A break chance of 0.1 means ~1 in 10 sends adds an extra 10–35 min pause.</p>

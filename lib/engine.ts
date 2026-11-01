@@ -211,13 +211,7 @@ export async function tick(): Promise<string> {
   const cfg = await loadConfig();
   const g: GlobalCfg = getGlobal(cfg), state = getState(cfg), zs = getZoho(cfg);
   if (!zs.refresh) return "zoho not connected";
-
-  // Resolve the sender pool for round-robin
-  const pool: string[] = g.fromAddresses && g.fromAddresses.length > 0
-    ? g.fromAddresses
-    : g.fromAddress ? [g.fromAddress] : [];
-  if (!pool.length) return "from address not set";
-
+  if (!g.fromAddress) return "from address not set";
   const zoho = new Zoho(g.dc, zs);
 
   const ctxs: Ctx[] = [];
@@ -231,6 +225,15 @@ export async function tick(): Promise<string> {
   let result = "idle";
   const now = new Date();
   state.stamps = state.stamps.filter((s) => now.getTime() - s.t < 86400000);
+  if (!state.companyLast) state.companyLast = {};
+
+  // Prune companyLast entries older than 7 days
+  const weekMs = 7 * 86400000;
+  for (const k of Object.keys(state.companyLast)) {
+    if (now.getTime() - state.companyLast[k] > weekMs) delete state.companyLast[k];
+  }
+
+  const companyGapMs = (g.companyGapH ?? 24) * 3600000;
 
   if (!g.paused && now.getTime() >= state.nextAllowed && state.stamps.length < g.cap) {
     const elig: { x: Ctx; r: number }[] = [];
@@ -242,7 +245,11 @@ export async function tick(): Promise<string> {
         const st = get(x, r, "Status"), due = get(x, r, "Due At");
         if (!due || (st !== "Not Sent" && st !== "Awaiting Reply")) continue;
         if (new Date(due).getTime() > now.getTime()) continue;
-        // Use Location if available, otherwise always in-window (fallback)
+
+        // Company spacing: skip if another contact at same company was emailed recently
+        const co = norm(get(x, r, "Company"));
+        if (co && state.companyLast[co] && now.getTime() - state.companyLast[co] < companyGapMs) continue;
+
         const loc = get(x, r, "Location");
         if (!loc || inWindow(now, loc, x.cfg.startH, x.cfg.endH)) elig.push({ x, r });
       }
@@ -250,12 +257,11 @@ export async function tick(): Promise<string> {
     for (const x of ctxs) await flush(x);
     if (elig.length) {
       const { x, r } = elig[Math.floor(Math.random() * elig.length)];
-      // Round-robin sender
-      const rrIdx = (state.rrIndex || 0) % pool.length;
-      const fromAddr = pool[rrIdx];
-      state.rrIndex = rrIdx + 1;
-      result = await sendOne(x, r, zoho, g, state, fromAddr);
+      result = await sendOne(x, r, zoho, g, state);
       state.stamps.push({ t: Date.now(), p: x.p.id });
+      // Record company send time
+      const co = norm(get(x, r, "Company"));
+      if (co) state.companyLast[co] = Date.now();
       const gap = (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000 + (Math.random() < g.breakChance ? (10 + Math.random() * 25) * 60000 : 0);
       state.nextAllowed = Date.now() + gap;
     }
@@ -264,8 +270,7 @@ export async function tick(): Promise<string> {
   return result;
 }
 
-
-async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State, fromAddr?: string) {
+async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State) {
   const email = get(x, r, "Email");
   const step = get(x, r, "Status") === "Not Sent" ? 0 : Number(get(x, r, "Follow-ups Sent") || 0) + 1;
   const tpl = x.cfg.templates[step];
@@ -275,7 +280,7 @@ async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State
   if (/\{\{.*?\}\}/.test(subject + body)) {
     set(x, r, "Status", "Needs Review"); set(x, r, "Due At", ""); await flush(x); return "unfilled placeholder: " + email;
   }
-  const sender = fromAddr || g.fromAddress;
+  const sender = g.fromAddress;
   const prev = get(x, r, "Message ID");
   let id: string;
   if (step === 0 || !prev) id = await zoho.send(email, subject, body, sender, g.senderName);
@@ -288,12 +293,10 @@ async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State
   if (step === 0) set(x, r, "Date Sent", nowIso.slice(0, 10));
   set(x, r, "Follow-ups Sent", step);
   set(x, r, "Last Step", step === 0 ? "Initial" : "Follow-up " + step);
-  // write the date into the user's own "Followup N" column if present
   const fuName = "followup" + step;
   if (step > 0 && x.col[fuName] !== undefined) set(x, r, x.header[x.col[fuName]], nowIso.slice(0, 10));
   if (step >= x.cfg.delays.length) { set(x, r, "Due At", ""); set(x, r, "Status", "No Response"); }
   else set(x, r, "Due At", new Date(Date.now() + x.cfg.delays[step] * 3600000).toISOString());
   await flush(x);
-  return `sent step ${step} to ${email} from ${sender}`;
+  return `sent step ${step} to ${email}`;
 }
-
