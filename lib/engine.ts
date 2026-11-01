@@ -172,7 +172,8 @@ function scheduleNew(x: Ctx) {
     const email = get(x, r, "Email").toLowerCase();
     if (!email) continue;
     let st = get(x, r, "Status");
-    if (["Needs Review", "Duplicate", "Responded", "Bounced", "No Response"].includes(st)) { seen[email] = 1; continue; }
+    // "Bounced" is NOT in this list — if user edits the email and clears Status, it retries
+    if (["Needs Review", "Duplicate", "Responded", "No Response"].includes(st)) { seen[email] = 1; continue; }
     if (seen[email]) { set(x, r, "Status", "Duplicate"); continue; }
     seen[email] = 1;
     if (get(x, r, "Due At")) continue;
@@ -227,7 +228,7 @@ export async function tick(force = false): Promise<string> {
   state.stamps = state.stamps.filter((s) => now.getTime() - s.t < 86400000);
   if (!state.lastCompany) state.lastCompany = "";
 
-  if ((force || !g.paused) && now.getTime() >= state.nextAllowed && state.stamps.length < g.cap) {
+  if ((force || !g.paused) && (force || now.getTime() >= state.nextAllowed) && state.stamps.length < g.cap) {
     const elig: { x: Ctx; r: number; co: string }[] = [];
     for (const x of ctxs) {
       if (x.cfg.paused) continue;
