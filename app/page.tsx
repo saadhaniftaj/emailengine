@@ -55,7 +55,9 @@ export default function Overview() {
           <h1 className="title">Outreach <span className="gradient-text">Engine</span></h1>
         </div>
         <div className="row">
-          <button className="btn ghost small" id="run-now" disabled={busy} onClick={runNow}>{busy ? "Running…" : "Run cycle now"}</button>
+          <button className="btn ghost small" id="run-now" disabled={busy} onClick={runNow} title="Manually trigger one send right now — same as what happens automatically every 5 min">
+            {busy ? "Sending…" : "⚡ Send one now"}
+          </button>
           <button id="master-toggle" className={"btn " + (g.paused ? "play" : "pause")} onClick={() => save({ global: { paused: !g.paused } })}>
             {g.paused ? "▶ Start engine" : "❚❚ Pause engine"}
           </button>
