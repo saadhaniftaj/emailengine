@@ -168,6 +168,7 @@ function mark(x: Ctx, r: number, status: string, label: string, hex: string, m: 
 function scheduleNew(x: Ctx) {
   const seen: Record<string, 1> = {};
   const dl = x.cfg.delays;
+  const startRow = x.cfg.startRow || 0; // rows at or below this index are old leads
   for (let r = 1; r < x.rows.length; r++) {
     const email = get(x, r, "Email").toLowerCase();
     if (!email) continue;
@@ -177,6 +178,10 @@ function scheduleNew(x: Ctx) {
     if (seen[email]) { set(x, r, "Status", "Duplicate"); continue; }
     seen[email] = 1;
     if (get(x, r, "Due At")) continue;
+
+    // Skip old leads that haven't been touched (blank status, no engine action yet)
+    // unless the user explicitly set a status like "Awaiting Reply"
+    if (startRow > 0 && r <= startRow && !st) continue;
 
     // Only 3 mandatory fields: Name, Email, Company
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !firstName(get(x, r, "Name")) || !get(x, r, "Company")) {
@@ -188,13 +193,9 @@ function scheduleNew(x: Ctx) {
     if (loc) set(x, r, "Time Zone", tzFor(loc).tz);
 
     const dateSent = get(x, r, "Date Sent");
-    // Skip rows already mailed before the engine started — do NOT reschedule them,
-    // keep Status blank so they stay invisible to the engine.
-    // Only process them if the Status was explicitly set to "Awaiting Reply".
-    if (!st && dateSent && !isNaN(Date.parse(dateSent))) {
-      // Pre-existing send — leave alone, do not queue a follow-up automatically.
-      continue;
-    }
+    // Skip rows already mailed before the engine started
+    if (!st && dateSent && !isNaN(Date.parse(dateSent))) continue;
+
     if (!st || st === "Not Sent") {
       set(x, r, "Status", "Not Sent"); set(x, r, "Due At", new Date().toISOString());
     } else if (st === "Awaiting Reply") {
@@ -247,10 +248,14 @@ export async function tick(force = false): Promise<string> {
     for (const x of ctxs) await flush(x);
 
     if (elig.length) {
-      // Prefer leads whose company is NOT the last one we emailed (interleave)
-      const preferred = elig.filter((e) => e.co !== state.lastCompany);
-      const pool = preferred.length > 0 ? preferred : elig; // fallback: all eligible
-      const pick = pool[Math.floor(Math.random() * pool.length)];
+      // Sort newest first (highest row index = most recently added)
+      elig.sort((a, b) => b.r - a.r);
+      // For forced/manual sends: always pick the newest eligible lead
+      // For auto: pick randomly from the top-10 newest to still have some variety
+      const pool = force ? [elig[0]] : elig.slice(0, Math.min(elig.length, 10));
+      const preferred = pool.filter((e) => e.co !== state.lastCompany);
+      const candidates = preferred.length > 0 ? preferred : pool;
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
       result = await sendOne(pick.x, pick.r, zoho, g, state);
       state.stamps.push({ t: Date.now(), p: pick.x.p.id });
       state.lastCompany = pick.co; // remember for next tick

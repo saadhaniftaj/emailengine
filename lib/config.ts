@@ -16,6 +16,7 @@ export type PipelineCfg = {
   startH: number;        // lead-local send window start (hour, decimals ok)
   endH: number;
   cap: number;           // max sends per rolling 24h for this pipeline
+  startRow: number;      // engine ignores rows <= this (0 = process all)
 };
 export type GlobalCfg = {
   paused: boolean;
@@ -62,6 +63,7 @@ export const DEFAULT_PIPELINE: PipelineCfg = {
   startH: 8,
   endH: 11,
   cap: 75,
+  startRow: 0,
 };
 export const DEFAULT_GLOBAL: GlobalCfg = {
   paused: true,

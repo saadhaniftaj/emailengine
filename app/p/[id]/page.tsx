@@ -79,6 +79,28 @@ export default function PipelinePage() {
         </div>
       </section>
 
+      <section className="glass stack" style={{ marginTop: "1.5rem", border: "1px solid rgba(255,180,0,.25)", background: "rgba(255,180,0,.04)" }}>
+        <div className="row between">
+          <div>
+            <h2>Skip old leads</h2>
+            <p className="hint" style={{ margin: ".3rem 0 0" }}>
+              {cfg.startRow > 0
+                ? <><b style={{ color: "var(--green)" }}>✓ Active</b> — engine only processes rows added after row {cfg.startRow}. New leads you add below that point are picked up automatically.</>
+                : <>Engine is scanning <b>all rows</b> including old ones. Click the button to make it ignore everything already in the sheet and only pick up new leads you add from now on.</>}
+            </p>
+          </div>
+          <button className="btn" id="set-start-row" style={{ whiteSpace: "nowrap" }}
+            onClick={async () => {
+              const r = await fetch(`/api/pipeline/${id}/startrow`, { method: "POST" });
+              const j = await r.json();
+              if (j.ok) { upd({ startRow: j.startRow }); setToast(`Start row set to ${j.startRow} ✓`); }
+              else setToast("Failed: " + j.error);
+            }}>
+            {cfg.startRow > 0 ? "↻ Reset to current last row" : "Skip all existing leads →"}
+          </button>
+        </div>
+      </section>
+
       <div className="stack" style={{ marginTop: "1.5rem" }}>
         {cfg.templates.map((t: any, i: number) => (
           <section className="glass" key={i}>
