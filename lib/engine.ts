@@ -283,8 +283,9 @@ async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State
   const sender = g.fromAddress;
   const prev = get(x, r, "Message ID");
   let id: string;
-  if (step === 0 || !prev) id = await zoho.send(email, subject, body, sender, g.senderName);
-  else id = (await zoho.reply(prev, email, subject, body, sender, g.senderName)).id;
+  const sig = g.signatureHtml || undefined; // undefined = fall back to Zoho API sig
+  if (step === 0 || !prev) id = await zoho.send(email, subject, body, sender, g.senderName, sig);
+  else id = (await zoho.reply(prev, email, subject, body, sender, g.senderName, sig)).id;
 
   const nowIso = new Date().toISOString();
   if (step === 0 || !prev) set(x, r, "Message ID", id);

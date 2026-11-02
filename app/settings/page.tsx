@@ -47,6 +47,22 @@ export default function Settings() {
           <div><label className="f">Long break chance (0–1)</label><input type="number" step="0.05" min="0" max="1" value={g.breakChance} onChange={(e) => upd({ breakChance: +e.target.value })} /></div>
         </div>
         <p className="hint">Gaps are random. A break chance of 0.1 means ~1 in 10 sends adds an extra 10–35 min pause.</p>
+
+        <div style={{ marginTop: "1.2rem" }}>
+          <label className="f">Email signature HTML</label>
+          <p className="hint" style={{ margin: ".2rem 0 .5rem" }}>
+            Paste your Zoho signature HTML here. Go to{" "}
+            <code className="k">mail.zoho.com → Settings → Signatures</code>, right-click your signature → Inspect → copy the outer HTML of the signature div. Paste it below. It will be appended to every email automatically.
+          </p>
+          <textarea
+            id="sig-html"
+            rows={5}
+            style={{ width: "100%", fontFamily: "monospace", fontSize: "12px" }}
+            placeholder='<div><b>Sohail Anwar</b> ...'
+            value={g.signatureHtml || ""}
+            onChange={(e) => upd({ signatureHtml: e.target.value })}
+          />
+        </div>
         <div><button className="btn" id="save-global" onClick={save}>Save</button></div>
       </section>
 

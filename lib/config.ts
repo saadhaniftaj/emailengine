@@ -21,8 +21,8 @@ export type PipelineCfg = {
 export type GlobalCfg = {
   paused: boolean;
   senderName: string;
-  fromAddress: string;  // kept for backward compat; first of fromAddresses
-  // (no per-company gap needed — interleaving is handled by lastCompany in State)
+  fromAddress: string;
+  signatureHtml: string;  // pasted from Zoho settings — appended to every outgoing email
   dc: string;
   cap: number;
   minGap: number;
@@ -69,7 +69,7 @@ export const DEFAULT_GLOBAL: GlobalCfg = {
   paused: true,
   senderName: "Sohail Anwar",
   fromAddress: "",
-  // companyGapH removed — engine interleaves by domain instead
+  signatureHtml: "",
   dc: "com",
   cap: 150,
   minGap: 3,
