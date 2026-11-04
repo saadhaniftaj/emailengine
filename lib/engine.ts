@@ -165,7 +165,7 @@ function mark(x: Ctx, r: number, status: string, label: string, hex: string, m: 
 }
 
 /* ---------- scheduling ---------- */
-function scheduleNew(x: Ctx) {
+function scheduleNew(x: Ctx, isManual = false) {
   const seen: Record<string, 1> = {};
   const dl = x.cfg.delays;
   const startRow = x.cfg.startRow || 0; // rows at or below this index are old leads
@@ -181,7 +181,7 @@ function scheduleNew(x: Ctx) {
 
     // Skip old leads that haven't been touched (blank status, no engine action yet)
     // unless the user explicitly set a status like "Awaiting Reply"
-    if (startRow > 0 && r <= startRow && !st) continue;
+    if (!isManual && startRow > 0 && r <= startRow && !st) continue;
 
     // Only 3 mandatory fields: Name, Email, Company
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !firstName(get(x, r, "Name")) || !get(x, r, "Company")) {
@@ -199,6 +199,8 @@ function scheduleNew(x: Ctx) {
     if (!st || st === "Not Sent") {
       set(x, r, "Status", "Not Sent"); set(x, r, "Due At", new Date().toISOString());
     } else if (st === "Awaiting Reply") {
+      // Do not schedule auto follow-ups for leads sent via "Send One Now"
+      if (get(x, r, "Notes").toLowerCase().includes("send one now")) continue;
       const sent = Number(get(x, r, "Follow-ups Sent") || 0);
       if (sent >= dl.length) { set(x, r, "Status", "No Response"); continue; }
       const last = new Date(get(x, r, "Last Sent At") || Date.now()).getTime();
@@ -229,18 +231,27 @@ export async function tick(force = false): Promise<string> {
   state.stamps = state.stamps.filter((s) => now.getTime() - s.t < 86400000);
   if (!state.lastCompany) state.lastCompany = "";
 
-  if ((force || !g.paused) && (force || now.getTime() >= state.nextAllowed) && state.stamps.length < g.cap) {
+  if ((force || !g.paused) && (force || now.getTime() >= state.nextAllowed) && (force || state.stamps.length < g.cap)) {
     const elig: { x: Ctx; r: number; co: string }[] = [];
     for (const x of ctxs) {
-      if (x.cfg.paused) continue;
-      scheduleNew(x);
-      if (state.stamps.filter((s) => s.p === x.p.id).length >= x.cfg.cap) continue;
+      if (!force && x.cfg.paused) continue;
+      scheduleNew(x, force);
+      if (!force && state.stamps.filter((s) => s.p === x.p.id).length >= x.cfg.cap) continue;
       for (let r = 1; r < x.rows.length; r++) {
         const st = get(x, r, "Status"), due = get(x, r, "Due At");
         if (!due || (st !== "Not Sent" && st !== "Awaiting Reply")) continue;
-        if (new Date(due).getTime() > now.getTime()) continue;
+
+        // "Send One Now" (force = true) is STRICTLY for newly added leads (initial outreach).
+        // It must NEVER pick an existing lead to send a follow-up.
+        if (force && st !== "Not Sent") continue;
+
+        // Auto cron checks Due At timestamp; manual "Send one now" is immediate
+        if (!force && new Date(due).getTime() > now.getTime()) continue;
+
+        // Auto cron respects local morning window; manual "Send one now" bypasses it
         const loc = get(x, r, "Location");
-        if (loc && !inWindow(now, loc, x.cfg.startH, x.cfg.endH)) continue;
+        if (!force && loc && !inWindow(now, loc, x.cfg.startH, x.cfg.endH)) continue;
+
         const co = norm(get(x, r, "Company"));
         elig.push({ x, r, co });
       }
@@ -248,21 +259,28 @@ export async function tick(force = false): Promise<string> {
     for (const x of ctxs) await flush(x);
 
     if (elig.length) {
-      // Sort newest first (highest row index = most recently added)
+      // Sort newest first (highest row index = most recently added lead)
       elig.sort((a, b) => b.r - a.r);
-      // For forced/manual sends: always pick the newest eligible lead
+      // For forced/manual sends: strictly pick the newest unmailed lead
       // For auto: pick randomly from the top-10 newest to still have some variety
-      const pool = force ? [elig[0]] : elig.slice(0, Math.min(elig.length, 10));
-      const preferred = pool.filter((e) => e.co !== state.lastCompany);
-      const candidates = preferred.length > 0 ? preferred : pool;
-      const pick = candidates[Math.floor(Math.random() * candidates.length)];
-      result = await sendOne(pick.x, pick.r, zoho, g, state);
+      let pick: { x: Ctx; r: number; co: string };
+      if (force) {
+        pick = elig[0];
+      } else {
+        const pool = elig.slice(0, Math.min(elig.length, 10));
+        const preferred = pool.filter((e) => e.co !== state.lastCompany);
+        const candidates = preferred.length > 0 ? preferred : pool;
+        pick = candidates[Math.floor(Math.random() * candidates.length)];
+      }
+      result = await sendOne(pick.x, pick.r, zoho, g, state, force);
       state.stamps.push({ t: Date.now(), p: pick.x.p.id });
       state.lastCompany = pick.co; // remember for next tick
       // Random gap between sends (minutes) + occasional long break
       const gap = (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000
         + (Math.random() < g.breakChance ? (10 + Math.random() * 25) * 60000 : 0);
       state.nextAllowed = Date.now() + gap;
+    } else if (force) {
+      result = "No new unmailed leads found in sheet";
     }
   }
   await saveKey("state", state);
@@ -270,7 +288,7 @@ export async function tick(force = false): Promise<string> {
 }
 
 
-async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State) {
+async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State, isManual = false) {
   const email = get(x, r, "Email");
   const step = get(x, r, "Status") === "Not Sent" ? 0 : Number(get(x, r, "Follow-ups Sent") || 0) + 1;
   const tpl = x.cfg.templates[step];
@@ -296,8 +314,15 @@ async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State
   set(x, r, "Last Step", step === 0 ? "Initial" : "Follow-up " + step);
   const fuName = "followup" + step;
   if (step > 0 && x.col[fuName] !== undefined) set(x, r, x.header[x.col[fuName]], nowIso.slice(0, 10));
-  if (step >= x.cfg.delays.length) { set(x, r, "Due At", ""); set(x, r, "Status", "No Response"); }
-  else set(x, r, "Due At", new Date(Date.now() + x.cfg.delays[step] * 3600000).toISOString());
+  if (isManual) {
+    set(x, r, "Notes", "Sent via Send One Now (no auto follow-ups)");
+    set(x, r, "Due At", "");
+  } else if (step >= x.cfg.delays.length) {
+    set(x, r, "Due At", "");
+    set(x, r, "Status", "No Response");
+  } else {
+    set(x, r, "Due At", new Date(Date.now() + x.cfg.delays[step] * 3600000).toISOString());
+  }
   await flush(x);
   return `sent step ${step} to ${email}`;
 }
