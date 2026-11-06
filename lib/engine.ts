@@ -226,6 +226,12 @@ export async function tick(force = false): Promise<string> {
   await scanReplies(ctxs, zoho, state, 2);
   for (const x of ctxs) await flush(x);
 
+  if (force) {
+    const out = await sendLatest(ctxs, zoho, g, state);
+    await saveKey("state", state);
+    return out;
+  }
+
   let result = "idle";
   const now = new Date();
   state.stamps = state.stamps.filter((s) => now.getTime() - s.t < 86400000);
@@ -290,7 +296,7 @@ export async function tick(force = false): Promise<string> {
 
 async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State, isManual = false) {
   const email = get(x, r, "Email");
-  const step = get(x, r, "Status") === "Not Sent" ? 0 : Number(get(x, r, "Follow-ups Sent") || 0) + 1;
+  const step = isManual || get(x, r, "Status") === "Not Sent" ? 0 : Number(get(x, r, "Follow-ups Sent") || 0) + 1;
   const tpl = x.cfg.templates[step];
   if (!tpl) { set(x, r, "Status", "No Response"); set(x, r, "Due At", ""); await flush(x); return "no template"; }
   const vars = leadVars(x, r);
@@ -325,4 +331,36 @@ async function sendOne(x: Ctx, r: number, zoho: Zoho, g: GlobalCfg, state: State
   }
   await flush(x);
   return `sent step ${step} to ${email}`;
+}
+
+
+/**
+ * "Send one now": strictly the LATEST entry (last row with an email) of every ACTIVE
+ * (not paused) pipeline gets its initial email. Never sends follow-ups, never picks older rows.
+ */
+async function sendLatest(ctxs: Ctx[], zoho: Zoho, g: GlobalCfg, state: State): Promise<string> {
+  const out: string[] = [];
+  for (const x of ctxs) {
+    if (x.cfg.paused) { out.push(`${x.p.label}: paused, skipped`); continue; }
+    let r = -1;
+    for (let i = x.rows.length - 1; i >= 1; i--) if (get(x, i, "Email")) { r = i; break; }
+    if (r < 0) { out.push(`${x.p.label}: no entries`); continue; }
+    const email = get(x, r, "Email");
+    const st = get(x, r, "Status");
+    if (st && st !== "Not Sent") { out.push(`${x.p.label}: latest entry ${email} already handled (${st}), nothing sent`); continue; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !firstName(get(x, r, "Name")) || !get(x, r, "Company")) {
+      set(x, r, "Status", "Needs Review"); set(x, r, "Notes", "Missing name, email or company"); await flush(x);
+      out.push(`${x.p.label}: latest entry ${email} missing name/email/company`); continue;
+    }
+    const loc = get(x, r, "Location");
+    if (loc) set(x, r, "Time Zone", tzFor(loc).tz);
+    set(x, r, "Status", "Not Sent");
+    try {
+      out.push(`${x.p.label}: ` + await sendOne(x, r, zoho, g, state, true));
+      state.stamps.push({ t: Date.now(), p: x.p.id });
+    } catch (e: any) {
+      out.push(`${x.p.label}: failed ${email}: ${e.message}`);
+    }
+  }
+  return out.join(" | ");
 }
