@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 // 60-second server-side cache to avoid Sheets API quota errors
 let cache: { data: unknown; at: number } | null = null;
-const CACHE_TTL = 60_000;
+const CACHE_TTL = 15_000;
 
 export async function GET() {
   const env = {
@@ -29,6 +29,7 @@ export async function GET() {
     const tabs = await getTabs();
     const state = getState(cfg), now = Date.now();
     const pipelines = [];
+    let queued = 0, nextDue = 0;
     for (const p of PIPELINES) {
       const tab = tabs.find((t) => t.title.trim().toLowerCase() === p.tab.toLowerCase());
       const pc = getPipeline(cfg, p.id);
@@ -38,13 +39,20 @@ export async function GET() {
         const rows = await readTab(tab.title);
         const h = (rows[0] || []).map(norm);
         const ix = (n: string) => h.indexOf(norm(n));
-        const [iE, iN, iC, iS, iR, iSn, iRa] = ["Email", "Name", "Company", "Status", "Reply Status", "Reply Snippet", "Replied At"].map(ix);
+        const [iE, iN, iC, iS, iR, iSn, iRa, iD] = ["Email", "Name", "Company", "Status", "Reply Status", "Reply Snippet", "Replied At", "Due At"].map(ix);
         for (let r = 1; r < rows.length; r++) {
           const row = rows[r];
           if (!row[iE]) continue;
           counts.total++;
           const st = (iS >= 0 ? row[iS] : "") || "Not Sent";
-          if (st === "Not Sent") counts.notSent++;
+          if (st === "Not Sent") {
+            counts.notSent++;
+            if (!pc.paused) {
+              queued++;
+              const due = iD >= 0 ? Date.parse(row[iD] || "") : NaN;
+              if (!isNaN(due) && (!nextDue || due < nextDue)) nextDue = due;
+            }
+          }
           else if (st === "Awaiting Reply") counts.awaiting++;
           else if (st === "Responded") {
             counts.replied++;
@@ -66,6 +74,10 @@ export async function GET() {
       ready: true, env, global: g, zohoConnected: !!getZoho(cfg).refresh, pipelines,
       sent24h: state.stamps.filter((s) => now - s.t < 86400000).length,
       nextAllowed: state.nextAllowed,
+      queue: {
+        queued, nextDue, lastTick: state.lastTick || 0, lastSentAt: state.lastSentAt || 0,
+        batchTotal: state.batchTotal || 0, batchSent: state.batchSent || 0, batchEnd: state.batchEnd || 0, now,
+      },
     };
     cache = { data, at: Date.now() }; // store in cache
     return NextResponse.json(data);

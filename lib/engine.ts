@@ -165,7 +165,7 @@ function mark(x: Ctx, r: number, status: string, label: string, hex: string, m: 
 }
 
 /* ---------- scheduling ---------- */
-function scheduleNew(x: Ctx, state: State, isManual = false) {
+function scheduleNew(x: Ctx, state: State, isManual = false): number[] {
   const fresh: number[] = []; // rows needing a (re)staggered send slot
   const staggerFrom = state.staggerFrom || Date.now();
   const seen: Record<string, 1> = {};
@@ -213,19 +213,43 @@ function scheduleNew(x: Ctx, state: State, isManual = false) {
     }
   }
 
-  // Humanized batch scheduling: give every new row its own randomized send slot (newest first),
-  // so a batch of N trickles out over hours instead of all being due at once.
-  let cursor = Math.max(Date.now(), state.slotCursor || 0);
-  for (let i = fresh.length - 1; i >= 0; i--) {
-    set(x, fresh[i], "Due At", new Date(cursor).toISOString());
-    cursor += humanGapMs();
-  }
-  state.slotCursor = cursor;
+  return fresh;
 }
 
-/** Random gap between batch sends: 2.5-8 min, plus an occasional 8-20 min pause (~8%). */
-function humanGapMs() {
-  return (2.5 + Math.random() * 5.5) * 60000 + (Math.random() < 0.08 ? (8 + Math.random() * 12) * 60000 : 0);
+const TARGET_SPAN_MS = 7.5 * 3600000; // aim to spread a batch over ~7.5h (gap clamped to 1.5-8 min avg)
+const COMPANY_COOLDOWN_MS = 60 * 60000; // never mail the same company twice within an hour
+
+/**
+ * Humanized batch scheduling. New rows from all active pipelines are interleaved round-robin by
+ * company (CFO -> other companies -> HR -> ...), then each gets a randomized send slot. The average gap
+ * adapts to batch size so 50/100/150 leads all spread over roughly 7-8 hours.
+ */
+function assignSlots(fresh: { x: Ctx; r: number; co: string }[], state: State) {
+  if (!fresh.length) return;
+  const groups = new Map<string, { x: Ctx; r: number; co: string }[]>();
+  for (const f of fresh.slice().reverse()) { // newest first
+    const k = f.co || "?" + f.r;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(f);
+  }
+  const order: { x: Ctx; r: number; co: string }[] = [];
+  while (groups.size) {
+    for (const [k, list] of Array.from(groups.entries())) {
+      order.push(list.shift()!);
+      if (!list.length) groups.delete(k);
+    }
+  }
+  const now = Date.now();
+  if ((state.batchSent || 0) >= (state.batchTotal || 0)) { state.batchTotal = 0; state.batchSent = 0; state.batchStart = now; }
+  state.batchTotal = (state.batchTotal || 0) + order.length;
+  const avg = Math.min(8 * 60000, Math.max(1.5 * 60000, TARGET_SPAN_MS / order.length));
+  let cursor = Math.max(now, state.slotCursor || 0);
+  for (const o of order) {
+    set(o.x, o.r, "Due At", new Date(cursor).toISOString());
+    cursor += avg * 0.8 * (0.5 + Math.random()) + (Math.random() < 0.06 ? avg * (3 + Math.random() * 3) : 0);
+  }
+  state.slotCursor = cursor;
+  state.batchEnd = cursor;
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -258,10 +282,16 @@ export async function tick(force = false): Promise<string> {
   if (!state.lastCompany) state.lastCompany = "";
 
   if (!state.staggerFrom) state.staggerFrom = now.getTime();
+  state.lastTick = now.getTime();
   const t0 = Date.now();
   const MAX_PER_TICK = 3; // sends per run; spaced by short random pauses, rest wait for next run
   if (!g.paused) {
-    for (const x of ctxs) { if (!x.cfg.paused) scheduleNew(x, state); }
+    const freshAll: { x: Ctx; r: number; co: string }[] = [];
+    for (const x of ctxs) {
+      if (x.cfg.paused) continue;
+      for (const r of scheduleNew(x, state)) freshAll.push({ x, r, co: norm(get(x, r, "Company")) });
+    }
+    assignSlots(freshAll, state);
     for (const x of ctxs) await flush(x);
 
     const sent: string[] = [];
@@ -282,7 +312,9 @@ export async function tick(force = false): Promise<string> {
           if (!step0 && cur.getTime() < state.nextAllowed) continue;
           const loc = get(x, r, "Location");
           if (loc && !inWindow(cur, loc, x.cfg.startH, x.cfg.endH)) continue;
-          elig.push({ x, r, co: norm(get(x, r, "Company")), due, step0 });
+          const co = norm(get(x, r, "Company"));
+          if (co && cur.getTime() - ((state.companyLast || {})[co] || 0) < COMPANY_COOLDOWN_MS) continue;
+          elig.push({ x, r, co, due, step0 });
         }
       }
       if (!elig.length) break;
@@ -293,6 +325,10 @@ export async function tick(force = false): Promise<string> {
         sent.push(res);
         state.stamps.push({ t: Date.now(), p: pick.x.p.id });
         state.lastCompany = pick.co;
+        state.lastSentAt = Date.now();
+        if (!state.companyLast) state.companyLast = {};
+        if (pick.co) state.companyLast[pick.co] = Date.now();
+        if (pick.step0 && (state.batchSent || 0) < (state.batchTotal || 0)) state.batchSent = (state.batchSent || 0) + 1;
         if (!pick.step0) state.nextAllowed = Date.now() + (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000;
       } catch (e: any) {
         sent.push("failed: " + e.message);

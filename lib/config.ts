@@ -30,7 +30,7 @@ export type GlobalCfg = {
   breakChance: number;
 };
 export type SentStamp = { t: number; p: string };
-export type State = { nextAllowed: number; stamps: SentStamp[]; seen: string[]; rrIndex: number; lastCompany: string; companyLast: Record<string, number>; slotCursor?: number; staggerFrom?: number };
+export type State = { nextAllowed: number; stamps: SentStamp[]; seen: string[]; rrIndex: number; lastCompany: string; companyLast: Record<string, number>; slotCursor?: number; staggerFrom?: number; lastTick?: number; lastSentAt?: number; batchTotal?: number; batchSent?: number; batchStart?: number; batchEnd?: number };
 export type ZohoState = { refresh?: string; accountId?: string; inboxId?: string };
 
 export const DEFAULT_TEMPLATES: Template[] = [

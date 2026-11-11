@@ -7,6 +7,8 @@ export default function Overview() {
   const [modal, setModal] = useState<any>(null);
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
+  const [tickNow, setTickNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setTickNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/overview", { cache: "no-store" });
@@ -46,6 +48,15 @@ export default function Overview() {
   );
 
   const g = d.global;
+  const q = d.queue || {};
+  const fmt = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60; return (h ? h + "h " : "") + (h || m ? m + "m " : "") + sec + "s"; };
+  const skew = tickNow - (q.now || tickNow); // keep countdowns correct between 30s refreshes
+  const nextIn = q.nextDue ? q.nextDue - tickNow + 0 : 0;
+  const tickAge = q.lastTick ? tickNow - q.lastTick : Infinity;
+  const total = q.batchTotal || 0, done = Math.min(q.batchSent || 0, total);
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const stale = !g.paused && q.queued > 0 && tickAge > 20 * 60000;
+  void skew;
   return (
     <main className="container">
       <span className="section-label">Control center</span>
@@ -68,6 +79,29 @@ export default function Overview() {
         <span className="badge">{d.sent24h}/{g.cap} sent in the last 24h</span>{" "}
         <span className={"badge " + (d.zohoConnected ? "on" : "off")}>{d.zohoConnected ? "Zoho connected" : <Link href="/settings">Connect Zoho →</Link>}</span>
       </p>
+
+      {(total > 0 || q.queued > 0) && (
+        <section className="glass" style={{ marginBottom: "1rem" }} id="progress">
+          <div className="row between">
+            <h2>Send progress</h2>
+            <span className="badge">{done}/{total} sent · {q.queued} queued</span>
+          </div>
+          <div style={{ height: 12, borderRadius: 8, background: "rgba(0,0,0,.08)", overflow: "hidden", margin: ".8rem 0" }}>
+            <div style={{ width: pct + "%", height: "100%", background: "linear-gradient(90deg,#6366f1,#22c55e)", transition: "width .6s" }} />
+          </div>
+          <p className="hint">
+            {g.paused ? "⏸ Engine paused — nothing will send." :
+              q.queued === 0 ? "✅ Batch complete." :
+              nextIn > 0 ? <>⏱ Next email in <b>{fmt(nextIn)}</b></> :
+              "📨 Next email is due — sends on the next engine run (or is waiting for the lead's local send window / company cooldown)."}
+            {q.batchEnd > tickNow && q.queued > 0 ? <> · batch finishes around <b>{new Date(q.batchEnd).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></> : null}
+          </p>
+          <p className="hint">
+            Last send: {q.lastSentAt ? fmt(tickNow - q.lastSentAt) + " ago" : "—"} · Engine last ran: {q.lastTick ? fmt(tickAge) + " ago" : "never"}
+          </p>
+          {stale && <p className="hint" style={{ color: "var(--red)" }}>⚠ Engine hasn't run for {fmt(tickAge)} — check the GitHub Actions “engine tick” workflow.</p>}
+        </section>
+      )}
 
       <div className="grid2">
         {d.pipelines.map((p: any) => (
