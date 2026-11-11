@@ -165,7 +165,9 @@ function mark(x: Ctx, r: number, status: string, label: string, hex: string, m: 
 }
 
 /* ---------- scheduling ---------- */
-function scheduleNew(x: Ctx, isManual = false) {
+function scheduleNew(x: Ctx, state: State, isManual = false) {
+  const fresh: number[] = []; // rows needing a (re)staggered send slot
+  const staggerFrom = state.staggerFrom || Date.now();
   const seen: Record<string, 1> = {};
   const dl = x.cfg.delays;
   const startRow = x.cfg.startRow || 0; // rows at or below this index are old leads
@@ -177,7 +179,10 @@ function scheduleNew(x: Ctx, isManual = false) {
     if (["Needs Review", "Duplicate", "Responded", "No Response"].includes(st)) { seen[email] = 1; continue; }
     if (seen[email]) { set(x, r, "Status", "Duplicate"); continue; }
     seen[email] = 1;
-    if (get(x, r, "Due At")) continue;
+    const dueAt = get(x, r, "Due At");
+    // Rows already holding a send slot are left alone. Legacy 'Not Sent' rows whose slot predates
+    // the humanized scheduler (all stamped 'now') are re-staggered once.
+    if (dueAt && !((!st || st === "Not Sent") && (Date.parse(dueAt) || 0) < staggerFrom)) continue;
 
     // Skip old leads that haven't been touched (blank status, no engine action yet)
     // unless the user explicitly set a status like "Awaiting Reply"
@@ -197,7 +202,7 @@ function scheduleNew(x: Ctx, isManual = false) {
     if (!st && dateSent && !isNaN(Date.parse(dateSent))) continue;
 
     if (!st || st === "Not Sent") {
-      set(x, r, "Status", "Not Sent"); set(x, r, "Due At", new Date().toISOString());
+      set(x, r, "Status", "Not Sent"); fresh.push(r);
     } else if (st === "Awaiting Reply") {
       // Do not schedule auto follow-ups for leads sent via "Send One Now"
       if (get(x, r, "Notes").toLowerCase().includes("send one now")) continue;
@@ -207,7 +212,22 @@ function scheduleNew(x: Ctx, isManual = false) {
       set(x, r, "Due At", new Date(last + dl[sent] * 3600000).toISOString());
     }
   }
+
+  // Humanized batch scheduling: give every new row its own randomized send slot (newest first),
+  // so a batch of N trickles out over hours instead of all being due at once.
+  let cursor = Math.max(Date.now(), state.slotCursor || 0);
+  for (let i = fresh.length - 1; i >= 0; i--) {
+    set(x, fresh[i], "Due At", new Date(cursor).toISOString());
+    cursor += humanGapMs();
+  }
+  state.slotCursor = cursor;
 }
+
+/** Random gap between batch sends: 2.5-8 min, plus an occasional 8-20 min pause (~8%). */
+function humanGapMs() {
+  return (2.5 + Math.random() * 5.5) * 60000 + (Math.random() < 0.08 ? (8 + Math.random() * 12) * 60000 : 0);
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 
 /* ---------- main tick ---------- */
@@ -237,58 +257,51 @@ export async function tick(force = false): Promise<string> {
   state.stamps = state.stamps.filter((s) => now.getTime() - s.t < 86400000);
   if (!state.lastCompany) state.lastCompany = "";
 
-  if ((force || !g.paused) && (force || now.getTime() >= state.nextAllowed) && (force || state.stamps.length < g.cap)) {
-    const elig: { x: Ctx; r: number; co: string }[] = [];
-    for (const x of ctxs) {
-      if (!force && x.cfg.paused) continue;
-      scheduleNew(x, force);
-      if (!force && state.stamps.filter((s) => s.p === x.p.id).length >= x.cfg.cap) continue;
-      for (let r = 1; r < x.rows.length; r++) {
-        const st = get(x, r, "Status"), due = get(x, r, "Due At");
-        if (!due || (st !== "Not Sent" && st !== "Awaiting Reply")) continue;
-
-        // "Send One Now" (force = true) is STRICTLY for newly added leads (initial outreach).
-        // It must NEVER pick an existing lead to send a follow-up.
-        if (force && st !== "Not Sent") continue;
-
-        // Auto cron checks Due At timestamp; manual "Send one now" is immediate
-        if (!force && new Date(due).getTime() > now.getTime()) continue;
-
-        // Auto cron respects local morning window; manual "Send one now" bypasses it
-        const loc = get(x, r, "Location");
-        if (!force && loc && !inWindow(now, loc, x.cfg.startH, x.cfg.endH)) continue;
-
-        const co = norm(get(x, r, "Company"));
-        elig.push({ x, r, co });
-      }
-    }
+  if (!state.staggerFrom) state.staggerFrom = now.getTime();
+  const t0 = Date.now();
+  const MAX_PER_TICK = 3; // sends per run; spaced by short random pauses, rest wait for next run
+  if (!g.paused) {
+    for (const x of ctxs) { if (!x.cfg.paused) scheduleNew(x, state); }
     for (const x of ctxs) await flush(x);
 
-    if (elig.length) {
-      // Sort newest first (highest row index = most recently added lead)
-      elig.sort((a, b) => b.r - a.r);
-      // For forced/manual sends: strictly pick the newest unmailed lead
-      // For auto: pick randomly from the top-10 newest to still have some variety
-      let pick: { x: Ctx; r: number; co: string };
-      if (force) {
-        pick = elig[0];
-      } else {
-        const pool = elig.slice(0, Math.min(elig.length, 10));
-        const preferred = pool.filter((e) => e.co !== state.lastCompany);
-        const candidates = preferred.length > 0 ? preferred : pool;
-        pick = candidates[Math.floor(Math.random() * candidates.length)];
+    const sent: string[] = [];
+    for (let n = 0; n < MAX_PER_TICK && Date.now() - t0 < 35000; n++) {
+      const cur = new Date();
+      if (state.stamps.length >= g.cap) break;
+      const elig: { x: Ctx; r: number; co: string; due: number; step0: boolean }[] = [];
+      for (const x of ctxs) {
+        if (x.cfg.paused) continue;
+        if (state.stamps.filter((s) => s.p === x.p.id).length >= x.cfg.cap) continue;
+        for (let r = 1; r < x.rows.length; r++) {
+          const st = get(x, r, "Status"), dueS = get(x, r, "Due At");
+          if (!dueS || (st !== "Not Sent" && st !== "Awaiting Reply")) continue;
+          const due = new Date(dueS).getTime();
+          if (due > cur.getTime()) continue;
+          const step0 = st === "Not Sent";
+          // follow-ups keep the global gap timer; scheduled first emails are already spaced by their slots
+          if (!step0 && cur.getTime() < state.nextAllowed) continue;
+          const loc = get(x, r, "Location");
+          if (loc && !inWindow(cur, loc, x.cfg.startH, x.cfg.endH)) continue;
+          elig.push({ x, r, co: norm(get(x, r, "Company")), due, step0 });
+        }
       }
-      result = await sendOne(pick.x, pick.r, zoho, g, state, force);
-      state.stamps.push({ t: Date.now(), p: pick.x.p.id });
-      state.lastCompany = pick.co; // remember for next tick
-      // Random gap between sends (minutes) + occasional long break
-      const gap = (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000
-        + (Math.random() < g.breakChance ? (10 + Math.random() * 25) * 60000 : 0);
-      state.nextAllowed = Date.now() + gap;
-    } else if (force) {
-      result = "No new unmailed leads found in sheet";
+      if (!elig.length) break;
+      elig.sort((a, b) => (a.step0 === b.step0 ? a.due - b.due : a.step0 ? -1 : 1));
+      const pick = elig.find((e) => e.co !== state.lastCompany) || elig[0];
+      try {
+        const res = await sendOne(pick.x, pick.r, zoho, g, state);
+        sent.push(res);
+        state.stamps.push({ t: Date.now(), p: pick.x.p.id });
+        state.lastCompany = pick.co;
+        if (!pick.step0) state.nextAllowed = Date.now() + (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000;
+      } catch (e: any) {
+        sent.push("failed: " + e.message);
+        break;
+      }
+      await sleep(4000 + Math.random() * 8000);
     }
-  }
+    result = sent.length ? sent.join(" | ") : "idle";
+  } else result = "engine paused";
   await saveKey("state", state);
   return result;
 }
