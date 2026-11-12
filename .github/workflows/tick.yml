@@ -1,12 +1,28 @@
 name: engine tick
+# GitHub throttles "*/5" schedules to a few runs per day, so each run stays alive for ~5h50m
+# and pings the engine every minute itself. Overlapping runs queue (never run in parallel),
+# so coverage is effectively continuous.
 on:
   schedule:
     - cron: "*/5 * * * *"
+    - cron: "17 */4 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/tick.yml"]
+concurrency:
+  group: engine-tick
+  cancel-in-progress: false
 jobs:
   tick:
     runs-on: ubuntu-latest
+    timeout-minutes: 358
     steps:
-      - name: Call engine
+      - name: Ping engine every minute
         run: |
-          curl -fsS -m 55 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ secrets.APP_URL }}/api/cron"
+          end=$(( $(date +%s) + 349*60 ))
+          while [ $(date +%s) -lt $end ]; do
+            curl -sS -m 55 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ secrets.APP_URL }}/api/cron" || echo "ping failed"
+            echo
+            sleep 60
+          done
