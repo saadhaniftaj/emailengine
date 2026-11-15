@@ -1,6 +1,6 @@
 import { getZoho, saveKey, loadConfig, ZohoState } from "./config";
 
-let tokenCache: { t: string; exp: number } | null = null;
+let tokenCache: { t: string; exp: number; rt: string } | null = null;
 let sigCache: { html: string; at: number } | null = null; // cached signature HTML
 
 function base(dc: string) { return `https://mail.zoho.${dc}/api`; }
@@ -21,7 +21,8 @@ export async function exchangeGrant(code: string, dc: string): Promise<string> {
 }
 
 async function accessToken(dc: string, z: ZohoState) {
-  if (tokenCache && tokenCache.exp > Date.now()) return tokenCache.t;
+  // cache is tied to the refresh token, so reconnecting Zoho never reuses a stale access token
+  if (tokenCache && tokenCache.exp > Date.now() && tokenCache.rt === z.refresh) return tokenCache.t;
   if (!z.refresh) throw new Error("Zoho not connected");
   const res = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, {
     method: "POST",
@@ -34,14 +35,14 @@ async function accessToken(dc: string, z: ZohoState) {
   });
   const j = await res.json();
   if (!j.access_token) throw new Error("Zoho token error: " + JSON.stringify(j));
-  tokenCache = { t: j.access_token, exp: Date.now() + 50 * 60000 };
+  tokenCache = { t: j.access_token, exp: Date.now() + 50 * 60000, rt: z.refresh };
   return j.access_token as string;
 }
 
 export class Zoho {
   constructor(private dc: string, private z: ZohoState) {}
 
-  private async call(method: string, path: string, body?: unknown) {
+  private async call(method: string, path: string, body?: unknown, retried = false): Promise<any> {
     const res = await fetch(base(this.dc) + path, {
       method,
       headers: {
@@ -52,6 +53,8 @@ export class Zoho {
       body: body ? JSON.stringify(body) : undefined,
     });
     const txt = await res.text();
+    // stale/invalid access token: drop the cache and retry once with a fresh one
+    if (res.status === 401 && !retried) { tokenCache = null; return this.call(method, path, body, true); }
     if (!res.ok) throw new Error(`Zoho ${res.status} ${path}: ${txt.slice(0, 300)}`);
     return JSON.parse(txt);
   }
