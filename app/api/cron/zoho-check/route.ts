@@ -5,6 +5,10 @@ export const dynamic = "force-dynamic";
 
 /** Diagnostic (cron-secret protected): shows what Zoho grants the saved refresh token. No tokens are returned. */
 export async function GET(req: Request) {
+  try { return await run(req); } catch (e: any) { return NextResponse.json({ error: String(e?.message || e) }, { status: 500 }); }
+}
+
+async function run(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const cfg = await loadConfig(), g = getGlobal(cfg), z = getZoho(cfg);
