@@ -24,7 +24,7 @@ async function run(req: Request) {
     const h = { Authorization: "Zoho-oauthtoken " + tj.access_token, Accept: "application/json" };
     const a = await fetch(`https://mail.zoho.${g.dc}/api/accounts`, { headers: h });
     const aj: any = await a.json().catch(() => ({}));
-    out.accounts = { status: a.status, list: (aj.data || []).map((x: any) => ({ id: x.accountId, mail: x.primaryEmailAddress || x.mailboxAddress })), err: aj.data?.errorCode };
+    out.accounts = { status: a.status, list: (Array.isArray(aj.data) ? aj.data : []).map((x: any) => ({ id: x.accountId, mail: x.primaryEmailAddress || x.mailboxAddress })), err: aj.data?.errorCode, raw: Array.isArray(aj.data) ? undefined : JSON.stringify(aj).slice(0, 300) };
   }
   return NextResponse.json(out);
 }
