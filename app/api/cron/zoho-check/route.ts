@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadConfig, getGlobal, getZoho } from "@/lib/config";
+import { getAccessToken } from "@/lib/zoho";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +15,9 @@ async function run(req: Request) {
   const cfg = await loadConfig(), g = getGlobal(cfg), z = getZoho(cfg);
   const out: any = { dc: g.dc, hasRefresh: !!z.refresh, accountId: z.accountId, from: g.fromAddress };
   if (!z.refresh) return NextResponse.json(out);
-  const tr = await fetch(`https://accounts.zoho.${g.dc}/oauth/v2/token`, {
-    method: "POST",
-    body: new URLSearchParams({ grant_type: "refresh_token", client_id: process.env.ZOHO_CLIENT_ID || "", client_secret: process.env.ZOHO_CLIENT_SECRET || "", refresh_token: z.refresh }),
-  });
-  const tj = await tr.json();
-  out.token = { ok: !!tj.access_token, scope: tj.scope, api_domain: tj.api_domain, error: tj.error };
+  const tok = await getAccessToken(g.dc, z).catch((e: any) => { out.tokenError = String(e.message).slice(0, 200); return ""; });
+  const tj: any = { access_token: tok };
+  try { const st = JSON.parse(cfg["ztoken"] || "null"); if (st) out.tokenAgeMin = Math.round((Date.now() - st.at) / 60000); } catch {}
   if (tj.access_token) {
     const h = { Authorization: "Zoho-oauthtoken " + tj.access_token, Accept: "application/json" };
     const a = await fetch(`https://mail.zoho.${g.dc}/api/accounts`, { headers: h });

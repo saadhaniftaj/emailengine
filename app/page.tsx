@@ -104,7 +104,7 @@ export default function Overview() {
             {q.batchEnd > tickNow && q.queued > 0 ? <> · batch finishes around <b>{new Date(q.batchEnd).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></> : null}
           </p>
           <p className="hint">
-            Last send: {q.lastSentAt ? fmt(tickNow - q.lastSentAt) + " ago" : "—"} · Engine last ran: {q.lastTick ? fmt(tickAge) + " ago" : "never"}
+            Last send: {q.lastSentAt ? fmt(tickNow - q.lastSentAt) + " ago" : "—"} · Engine last ran: {q.lastTick ? fmt(tickAge) + " ago" : "never"} · Zoho token refreshed: {d.zohoTokenAt ? fmt(tickNow - d.zohoTokenAt) + " ago" : "—"}
           </p>
           {stale && <p className="hint" style={{ color: "var(--red)" }}>⚠ Engine hasn't run for {fmt(tickAge)} — check the GitHub Actions “engine tick” workflow.</p>}
         </section>

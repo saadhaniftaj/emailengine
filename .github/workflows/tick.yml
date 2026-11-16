@@ -3,13 +3,9 @@ name: engine tick
 # and pings the engine every minute itself. Overlapping runs queue (never run in parallel),
 # so coverage is effectively continuous.
 on:
-  schedule:
-    - cron: "*/5 * * * *"
-    - cron: "17 */4 * * *"
+  # Manual only: the engine is triggered every minute by cron-job.org. Running two triggers made
+  # overlapping runs that each asked Zoho for tokens. Start this by hand only as an emergency backup.
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: [".github/workflows/tick.yml"]
 concurrency:
   group: engine-tick
   cancel-in-progress: false

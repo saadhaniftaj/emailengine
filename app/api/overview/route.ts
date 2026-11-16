@@ -75,6 +75,7 @@ export async function GET() {
       sent24h: state.stamps.filter((s) => now - s.t < 86400000).length,
       nextAllowed: state.nextAllowed,
       zohoError: state.zohoError || "",
+      zohoTokenAt: (() => { try { return JSON.parse(cfg["ztoken"] || "null")?.at || 0; } catch { return 0; } })(),
       queue: {
         queued, nextDue, lastTick: state.lastTick || 0, lastSentAt: state.lastSentAt || 0,
         batchTotal: state.batchTotal || 0, batchSent: state.batchSent || 0, batchEnd: state.batchEnd || 0, now,

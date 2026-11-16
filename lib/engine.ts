@@ -110,7 +110,7 @@ export const previewVars = () => ({ firstname: "Alex", companyname: "Sample Rese
 const AUTO_SUBJ = /auto(matic)?[\s-]?(reply|response)|out of office|away from|vacation|\booo\b|automatische antwort|abwesenheit|r[ée]ponse automatique|absence|respuesta autom|fuera de la oficina|afwezig/i;
 const BOUNCE_SUBJ = /undeliver|delivery status|failure notice|returned mail|delivery has failed|couldn.t be delivered/i;
 
-const isZohoAuth = (e: any) => /Zoho (401|token error|not connected)/.test(String(e?.message || e));
+const isZohoAuth = (e: any) => /Zoho (401|token error|not connected|token refresh throttled)/.test(String(e?.message || e));
 
 async function scanReplies(ctxs: Ctx[], zoho: Zoho, state: State, days: number) {
   const map: Record<string, { x: Ctx; r: number }> = {};
@@ -262,6 +262,9 @@ export async function tick(force = false): Promise<string> {
   const g: GlobalCfg = getGlobal(cfg), state = getState(cfg), zs = getZoho(cfg);
   if (!zs.refresh) return "zoho not connected";
   if (!g.fromAddress) return "from address not set";
+  // overlapping runs (several triggers) must not both work: skip if another run is in progress
+  if (!force && (state.busyUntil || 0) > Date.now()) return "busy (another run in progress)";
+  if (!force) { state.busyUntil = Date.now() + 55000; await saveKey("state", state); }
   const zoho = new Zoho(g.dc, zs);
 
   const ctxs: Ctx[] = [];
@@ -269,7 +272,9 @@ export async function tick(force = false): Promise<string> {
     const x = await loadCtx(p, getPipeline(cfg, p.id));
     if (x) ctxs.push(x);
   }
-  try { await scanReplies(ctxs, zoho, state, 2); }
+  // reply scan hits Zoho, so do it at most every 5 minutes (not on every 1-minute tick)
+  const scanDue = force || !state.lastScan || Date.now() - state.lastScan >= 5 * 60000;
+  try { if (scanDue) { await scanReplies(ctxs, zoho, state, 2); state.lastScan = Date.now(); } }
   catch (err: any) { if (isZohoAuth(err)) { state.zohoError = String(err.message).slice(0, 200); await saveKey("state", state); } }
   for (const x of ctxs) await flush(x);
 
@@ -343,6 +348,7 @@ export async function tick(force = false): Promise<string> {
     }
     result = sent.length ? sent.join(" | ") : "idle";
   } else result = "engine paused";
+  state.busyUntil = 0;
   await saveKey("state", state);
   return result;
 }

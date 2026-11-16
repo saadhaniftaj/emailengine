@@ -1,6 +1,6 @@
 import { getZoho, saveKey, loadConfig, ZohoState } from "./config";
 
-let tokenCache: { t: string; exp: number; rt: string } | null = null;
+let tokenCache: { t: string; exp: number; rt: string; at: number } | null = null;
 let sigCache: { html: string; at: number } | null = null; // cached signature HTML
 
 function base(dc: string) { return `https://mail.zoho.${dc}/api`; }
@@ -20,10 +20,29 @@ export async function exchangeGrant(code: string, dc: string): Promise<string> {
   return j.refresh_token;
 }
 
-async function accessToken(dc: string, z: ZohoState) {
-  // cache is tied to the refresh token, so reconnecting Zoho never reuses a stale access token
-  if (tokenCache && tokenCache.exp > Date.now() && tokenCache.rt === z.refresh) return tokenCache.t;
+/**
+ * Access tokens are shared between ALL engine runs (stored in the _EngineConfig tab) and reused until
+ * ~5 min before expiry. Zoho caps active tokens per refresh token and invalidates older ones when it is
+ * exceeded, so we must NOT mint a token per run. Refreshes are also throttled to one per 2 minutes.
+ */
+type StoredToken = { t: string; exp: number; rt: string; at: number };
+const MIN_REFRESH_GAP = 2 * 60000;
+
+async function readStored(): Promise<StoredToken | null> {
+  try { const raw = (await loadConfig())["ztoken"]; return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+
+export async function getAccessToken(dc: string, z: ZohoState, bad?: string): Promise<string> {
   if (!z.refresh) throw new Error("Zoho not connected");
+  const fresh = (x: StoredToken | null) => !!x && x.rt === z.refresh && x.exp > Date.now() + 5 * 60000 && x.t !== bad;
+  if (fresh(tokenCache)) return tokenCache!.t;
+  let st = await readStored();
+  if (fresh(st)) { tokenCache = st; return st!.t; }
+  // someone may have refreshed a moment ago: honour the throttle, reuse their token if it differs from the rejected one
+  if (st && st.rt === z.refresh && Date.now() - st.at < MIN_REFRESH_GAP) {
+    if (st.t !== bad && st.exp > Date.now()) { tokenCache = st; return st.t; }
+    throw new Error("Zoho token refresh throttled (last refresh " + Math.round((Date.now() - st.at) / 1000) + "s ago) — will retry");
+  }
   const res = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token`, {
     method: "POST",
     body: new URLSearchParams({
@@ -35,18 +54,21 @@ async function accessToken(dc: string, z: ZohoState) {
   });
   const j = await res.json();
   if (!j.access_token) throw new Error("Zoho token error: " + JSON.stringify(j));
-  tokenCache = { t: j.access_token, exp: Date.now() + 50 * 60000, rt: z.refresh };
-  return j.access_token as string;
+  const next: StoredToken = { t: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000, rt: z.refresh, at: Date.now() };
+  tokenCache = next;
+  await saveKey("ztoken", next);
+  return next.t;
 }
 
 export class Zoho {
   constructor(private dc: string, private z: ZohoState) {}
 
-  private async call(method: string, path: string, body?: unknown, retried = false): Promise<any> {
+  private async call(method: string, path: string, body?: unknown, badToken?: string): Promise<any> {
+    const token = await getAccessToken(this.dc, this.z, badToken);
     const res = await fetch(base(this.dc) + path, {
       method,
       headers: {
-        Authorization: "Zoho-oauthtoken " + (await accessToken(this.dc, this.z)),
+        Authorization: "Zoho-oauthtoken " + token,
         Accept: "application/json",
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
@@ -54,7 +76,7 @@ export class Zoho {
     });
     const txt = await res.text();
     // stale/invalid access token: drop the cache and retry once with a fresh one
-    if (res.status === 401 && !retried) { tokenCache = null; return this.call(method, path, body, true); }
+    if (res.status === 401 && !badToken) { tokenCache = null; return this.call(method, path, body, token); }
     if (!res.ok) throw new Error(`Zoho ${res.status} ${path}: ${txt.slice(0, 300)}`);
     return JSON.parse(txt);
   }
