@@ -96,17 +96,37 @@ export default function Overview() {
           <div style={{ height: 12, borderRadius: 8, background: "rgba(0,0,0,.08)", overflow: "hidden", margin: ".8rem 0" }}>
             <div style={{ width: pct + "%", height: "100%", background: "linear-gradient(90deg,#6366f1,#22c55e)", transition: "width .6s" }} />
           </div>
-          <p className="hint">
-            {g.paused ? "⏸ Engine paused — nothing will send." :
-              q.queued === 0 ? "✅ Batch complete." :
-              nextIn > 0 ? <>⏱ Next email in <b>{fmt(nextIn)}</b></> :
-              "📨 Next email is due — sends on the next engine run (or is waiting for the lead's local send window / company cooldown)."}
-            {q.batchEnd > tickNow && q.queued > 0 ? <> · batch finishes around <b>{new Date(q.batchEnd).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></> : null}
+          <div className="hint" style={{ fontSize: "0.95rem", lineHeight: 1.6, color: "var(--text)" }}>
+            {g.paused ? (
+              <span>⏸ <b>Engine is paused</b> — click &quot;Start engine&quot; above to resume sending.</span>
+            ) : q.queued === 0 ? (
+              <span>✅ <b>All caught up!</b> All leads in active pipelines have been mailed.</span>
+            ) : q.nextLead ? (
+              <span>
+                {q.nextLead.status === "ready" && (
+                  <>🟢 <b>Ready to send on next tick:</b> {q.nextLead.name} at <b>{q.nextLead.company}</b> ({q.nextLead.email})</>
+                )}
+                {q.nextLead.status === "scheduled" && (
+                  <>⏱ <b>Next email in {fmt(Math.max(0, q.nextLead.due - tickNow))}:</b> {q.nextLead.name} at <b>{q.nextLead.company}</b> ({q.nextLead.email})</>
+                )}
+                {q.nextLead.status === "window_closed" && (
+                  <>🌙 <b>Waiting for lead local time window:</b> {q.nextLead.detail}</>
+                )}
+                {q.nextLead.status === "company_cooldown" && (
+                  <>⏳ <b>Company cooldown:</b> {q.nextLead.detail}</>
+                )}
+                {q.nextLead.status === "cap_reached" && (
+                  <>🛑 <b>Daily limit:</b> {q.nextLead.detail}</>
+                )}
+              </span>
+            ) : (
+              <span>📨 Next email will be evaluated on the next run.</span>
+            )}
+          </div>
+          <p className="hint" style={{ marginTop: ".5rem" }}>
+            Last send: {q.lastSentAt ? fmt(tickNow - q.lastSentAt) + " ago" : "—"} · Engine last ran: {q.lastTick ? fmt(tickAge) + " ago" : "never"} · Zoho token: {d.zohoTokenAt ? fmt(tickNow - d.zohoTokenAt) + " ago" : "connected"}
           </p>
-          <p className="hint">
-            Last send: {q.lastSentAt ? fmt(tickNow - q.lastSentAt) + " ago" : "—"} · Engine last ran: {q.lastTick ? fmt(tickAge) + " ago" : "never"} · Zoho token refreshed: {d.zohoTokenAt ? fmt(tickNow - d.zohoTokenAt) + " ago" : "—"}
-          </p>
-          {stale && <p className="hint" style={{ color: "var(--red)" }}>⚠ Engine hasn't run for {fmt(tickAge)} — check the GitHub Actions “engine tick” workflow.</p>}
+          {stale && <p className="hint" style={{ color: "var(--red)" }}>⚠ Engine hasn&apos;t run for {fmt(tickAge)} — check cron-job.org / GitHub Actions.</p>}
         </section>
       )}
 

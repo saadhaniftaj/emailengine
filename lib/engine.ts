@@ -67,6 +67,16 @@ const TZ: [RegExp, string][] = [
   [/colorado|denver|arizona|utah/, "America/Denver"],
   [/usa|^us$|united states|new york|boston|florida|miami|atlanta/, "America/New_York"],
 ];
+export function formatLocalTime(d: Date, loc: string): { timeStr: string; tz: string } {
+  const { tz } = tzFor(loc);
+  try {
+    const f = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "numeric", hour12: true });
+    return { timeStr: f.format(d), tz };
+  } catch {
+    return { timeStr: d.toLocaleTimeString([], { hour: "numeric", minute: "numeric" }), tz };
+  }
+}
+
 export function tzFor(loc: string) {
   const l = String(loc).toLowerCase().trim();
   const gulf = /uae|dubai|sharjah|abu dhabi|ksa|saudi|riyadh|egypt|qatar|kuwait|bahrain|oman/.test(l);
@@ -182,9 +192,11 @@ function scheduleNew(x: Ctx, state: State, isManual = false): number[] {
     if (seen[email]) { set(x, r, "Status", "Duplicate"); continue; }
     seen[email] = 1;
     const dueAt = get(x, r, "Due At");
-    // Rows already holding a send slot are left alone. Legacy 'Not Sent' rows whose slot predates
-    // the humanized scheduler (all stamped 'now') are re-staggered once.
-    if (dueAt && !((!st || st === "Not Sent") && (Date.parse(dueAt) || 0) < staggerFrom)) continue;
+    const dueTime = dueAt ? Date.parse(dueAt) : 0;
+    // Stale/overdue leads (e.g. from when engine was paused or Zoho was down) get smoothly re-staggered
+    const isUnsent = !st || st === "Not Sent";
+    const isStale = isUnsent && (!dueAt || isNaN(dueTime) || dueTime < Date.now() - 30 * 60000);
+    if (dueAt && !isStale) continue;
 
     // Skip old leads that haven't been touched (blank status, no engine action yet)
     // unless the user explicitly set a status like "Awaiting Reply"
@@ -245,7 +257,7 @@ function assignSlots(fresh: { x: Ctx; r: number; co: string }[], state: State) {
   if ((state.batchSent || 0) >= (state.batchTotal || 0)) { state.batchTotal = 0; state.batchSent = 0; state.batchStart = now; }
   state.batchTotal = (state.batchTotal || 0) + order.length;
   const avg = Math.min(8 * 60000, Math.max(1.5 * 60000, TARGET_SPAN_MS / order.length));
-  let cursor = Math.max(now, state.slotCursor || 0);
+  let cursor = Math.max(now, state.slotCursor && state.slotCursor > now ? state.slotCursor : now);
   for (const o of order) {
     set(o.x, o.r, "Due At", new Date(cursor).toISOString());
     cursor += avg * 0.8 * (0.5 + Math.random()) + (Math.random() < 0.06 ? avg * (3 + Math.random() * 3) : 0);
