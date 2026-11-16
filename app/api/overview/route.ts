@@ -74,6 +74,7 @@ export async function GET() {
       ready: true, env, global: g, zohoConnected: !!getZoho(cfg).refresh, pipelines,
       sent24h: state.stamps.filter((s) => now - s.t < 86400000).length,
       nextAllowed: state.nextAllowed,
+      zohoError: state.zohoError || "",
       queue: {
         queued, nextDue, lastTick: state.lastTick || 0, lastSentAt: state.lastSentAt || 0,
         batchTotal: state.batchTotal || 0, batchSent: state.batchSent || 0, batchEnd: state.batchEnd || 0, now,

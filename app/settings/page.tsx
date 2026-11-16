@@ -6,7 +6,7 @@ export default function Settings() {
   const [g, setG] = useState<any>(null);
   const [code, setCode] = useState("");
   const [toast, setToast] = useState("");
-  const say = (m: string) => { setToast(m); setTimeout(() => setToast(""), 3000); };
+  const say = (m: string) => { setToast(m); setTimeout(() => setToast(""), 9000); };
 
   useEffect(() => {
     fetch("/api/overview").then((r) => r.json()).then((x) => { setD(x); if (x.global) setG(x.global); });
@@ -22,7 +22,7 @@ export default function Settings() {
   }
   async function connect() {
     const r = await (await fetch("/api/zoho", { method: "POST", body: JSON.stringify({ code }) })).json();
-    say(r.ok ? "Zoho connected ✓" : "Failed: " + r.error);
+    say(r.ok ? "Zoho connected ✓ (" + (r.mailbox || r.accountId) + ")" : "Failed: " + r.error);
     if (r.ok) { setCode(""); setD({ ...d, zohoConnected: true }); }
   }
 
@@ -68,12 +68,15 @@ export default function Settings() {
 
       <section className="glass stack" style={{ marginTop: "1.5rem" }}>
         <div className="row between"><h2>Zoho connection</h2>
-          <span className={"badge " + (d.zohoConnected ? "on" : "off")}><span className="dot" />{d.zohoConnected ? "Connected" : "Not connected"}</span></div>
-        <p className="hint">
-          1) In <code className="k">api-console.zoho.{g.dc}</code> open <b>Self Client</b>. 2) Generate a code with scope
-          <code className="k">ZohoMail.messages.ALL,ZohoMail.accounts.READ,ZohoMail.folders.READ</code> (10 min). 3) Paste it here. It expires fast, so generate it right before.
-          {!d.env.zohoClient && <b style={{ color: "var(--red)" }}> ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET are not set in Vercel yet.</b>}
-        </p>
+          <span className={"badge " + (d.zohoConnected && !d.zohoError ? "on" : "off")}><span className="dot" />{!d.zohoConnected ? "Not connected" : d.zohoError ? "Needs reconnect" : "Connected"}</span></div>
+        {d.zohoError && <p className="hint" style={{ color: "var(--red)" }}>⚠ Zoho is currently rejecting the saved login — reconnect below.</p>}
+        <ol className="hint" style={{ paddingLeft: "1.2rem", lineHeight: 1.7 }}>
+          <li>Open a <b>private/incognito window</b> and log in at <code className="k">mail.zoho.{g.dc}</code> as <b>{g.fromAddress || "the mailbox owner"}</b>. Make sure that inbox opens.</li>
+          <li>In the <b>same window</b> go to <code className="k">api-console.zoho.{g.dc}</code> → <b>Self Client</b> → <b>Generate Code</b>.</li>
+          <li>Scope: <code className="k">ZohoMail.messages.ALL,ZohoMail.accounts.READ,ZohoMail.folders.READ</code> · Time duration: <b>10 minutes</b> · any description → <b>Create</b>.</li>
+          <li>Copy the code, paste it below and click <b>Connect</b> within 10 minutes. You must see “Zoho connected ✓”.</li>
+        </ol>
+        {!d.env.zohoClient && <p className="hint"><b style={{ color: "var(--red)" }}>ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET are not set in Vercel yet.</b></p>}
         <div className="row"><input style={{ flex: 1, minWidth: 240 }} placeholder="Grant code" value={code} onChange={(e) => setCode(e.target.value)} />
           <button className="btn" id="connect-zoho" disabled={!code} onClick={connect}>Connect</button></div>
       </section>

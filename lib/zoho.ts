@@ -59,6 +59,19 @@ export class Zoho {
     return JSON.parse(txt);
   }
 
+  /** All mailbox accounts this Zoho login can access, with every email address attached to them. */
+  async accounts(): Promise<{ id: string; emails: string[] }[]> {
+    const r = await this.call("GET", "/accounts");
+    return (Array.isArray(r.data) ? r.data : []).map((a: any) => {
+      const emails = new Set<string>();
+      const add = (v: any) => { if (typeof v === "string" && v.includes("@")) emails.add(v.toLowerCase()); };
+      add(a.primaryEmailAddress); add(a.mailboxAddress); add(a.incomingUserName);
+      (a.emailAddress || []).forEach((e: any) => add(typeof e === "string" ? e : e?.mailId));
+      (a.sendMailDetails || []).forEach((e: any) => add(e?.fromAddress));
+      return { id: String(a.accountId), emails: Array.from(emails) };
+    });
+  }
+
   async accountId() {
     if (this.z.accountId) return this.z.accountId;
     const r = await this.call("GET", "/accounts");

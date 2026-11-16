@@ -80,6 +80,13 @@ export default function Overview() {
         <span className={"badge " + (d.zohoConnected ? "on" : "off")}>{d.zohoConnected ? "Zoho connected" : <Link href="/settings">Connect Zoho →</Link>}</span>
       </p>
 
+      {d.zohoError && (
+        <section className="glass" style={{ marginBottom: "1rem", borderColor: "var(--red)" }} id="zoho-error">
+          <h2 style={{ color: "var(--red)" }}>⚠ Zoho needs reconnecting</h2>
+          <p className="hint">Emails are paused because Zoho rejected the saved login. Open <Link href="/settings">Settings → Zoho connection</Link> and follow the steps to reconnect. Nothing else needs to change; queued emails resume automatically.</p>
+        </section>
+      )}
+
       {(total > 0 || q.queued > 0) && (
         <section className="glass" style={{ marginBottom: "1rem" }} id="progress">
           <div className="row between">

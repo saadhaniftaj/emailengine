@@ -110,6 +110,8 @@ export const previewVars = () => ({ firstname: "Alex", companyname: "Sample Rese
 const AUTO_SUBJ = /auto(matic)?[\s-]?(reply|response)|out of office|away from|vacation|\booo\b|automatische antwort|abwesenheit|r[ée]ponse automatique|absence|respuesta autom|fuera de la oficina|afwezig/i;
 const BOUNCE_SUBJ = /undeliver|delivery status|failure notice|returned mail|delivery has failed|couldn.t be delivered/i;
 
+const isZohoAuth = (e: any) => /Zoho (401|token error|not connected)/.test(String(e?.message || e));
+
 async function scanReplies(ctxs: Ctx[], zoho: Zoho, state: State, days: number) {
   const map: Record<string, { x: Ctx; r: number }> = {};
   for (const x of ctxs) for (let r = 1; r < x.rows.length; r++) {
@@ -267,7 +269,8 @@ export async function tick(force = false): Promise<string> {
     const x = await loadCtx(p, getPipeline(cfg, p.id));
     if (x) ctxs.push(x);
   }
-  await scanReplies(ctxs, zoho, state, 2);
+  try { await scanReplies(ctxs, zoho, state, 2); }
+  catch (err: any) { if (isZohoAuth(err)) { state.zohoError = String(err.message).slice(0, 200); await saveKey("state", state); } }
   for (const x of ctxs) await flush(x);
 
   if (force) {
@@ -326,12 +329,14 @@ export async function tick(force = false): Promise<string> {
         state.stamps.push({ t: Date.now(), p: pick.x.p.id });
         state.lastCompany = pick.co;
         state.lastSentAt = Date.now();
+        state.zohoError = "";
         if (!state.companyLast) state.companyLast = {};
         if (pick.co) state.companyLast[pick.co] = Date.now();
         if (pick.step0 && (state.batchSent || 0) < (state.batchTotal || 0)) state.batchSent = (state.batchSent || 0) + 1;
         if (!pick.step0) state.nextAllowed = Date.now() + (g.minGap + Math.random() * (g.maxGap - g.minGap)) * 60000;
       } catch (e: any) {
         sent.push("failed: " + e.message);
+        if (isZohoAuth(e)) state.zohoError = String(e.message).slice(0, 200);
         break;
       }
       await sleep(4000 + Math.random() * 8000);
