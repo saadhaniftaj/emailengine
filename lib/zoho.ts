@@ -59,6 +59,15 @@ export class Zoho {
     return JSON.parse(txt);
   }
 
+  /**
+   * Save only the cached ids, merged into whatever is stored RIGHT NOW. A tick that started before a
+   * reconnect must never write its stale refresh token back over the freshly connected one.
+   */
+  private async persist(patch: Partial<ZohoState>) {
+    const cur = getZoho(await loadConfig());
+    await saveKey("zoho", { ...cur, ...patch });
+  }
+
   /** All mailbox accounts this Zoho login can access, with every email address attached to them. */
   async accounts(): Promise<{ id: string; emails: string[] }[]> {
     const r = await this.call("GET", "/accounts");
@@ -76,7 +85,7 @@ export class Zoho {
     if (this.z.accountId) return this.z.accountId;
     const r = await this.call("GET", "/accounts");
     this.z.accountId = String(r.data[0].accountId);
-    await saveKey("zoho", this.z);
+    await this.persist({ accountId: this.z.accountId });
     return this.z.accountId;
   }
   async inboxId() {
@@ -84,7 +93,7 @@ export class Zoho {
     const r = await this.call("GET", `/accounts/${await this.accountId()}/folders`);
     const f = r.data.find((x: any) => String(x.folderType).toLowerCase() === "inbox");
     this.z.inboxId = String(f.folderId);
-    await saveKey("zoho", this.z);
+    await this.persist({ inboxId: this.z.inboxId });
     return this.z.inboxId;
   }
 
