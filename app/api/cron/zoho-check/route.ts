@@ -31,11 +31,15 @@ async function run(req: Request) {
     }
   }
 
-  if (fixWindows) {
+  const setStartH = url.searchParams.get("startH");
+  const setEndH = url.searchParams.get("endH");
+  if (setStartH !== null || setEndH !== null || fixWindows) {
     for (const p of PIPELINES) {
       const pc = getPipeline(cfg, p.id);
-      pc.startH = 0;
-      pc.endH = 24;
+      if (setStartH !== null) pc.startH = Number(setStartH);
+      else if (fixWindows) pc.startH = 8;
+      if (setEndH !== null) pc.endH = Number(setEndH);
+      else if (fixWindows) pc.endH = 18;
       await saveKey("pipeline:" + p.id, pc);
     }
   }
